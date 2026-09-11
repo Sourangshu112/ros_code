@@ -1,0 +1,203 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <model name="generic_amr">
+    <pose>0 0 0.1 0 0 0</pose>
+
+    <!-- Base Link (Chassis) -->
+    <link name="base_link">
+      <inertial>
+        <mass>15.0</mass>
+        <inertia>
+          <ixx>0.15</ixx>
+          <iyy>0.25</iyy>
+          <izz>0.35</izz>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+      <visual name="chassis_visual">
+        <geometry>
+          <box>
+            <size>0.6 0.4 0.2</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1.0</ambient>
+          <diffuse>0.3 0.5 0.7 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="chassis_collision">
+        <geometry>
+          <box>
+            <size>0.6 0.4 0.2</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Left Wheel -->
+    <link name="left_wheel">
+      <pose>0 0.22 -0.05 1.5708 0 0</pose>
+      <inertial>
+        <mass>1.5</mass>
+        <inertia>
+          <ixx>0.003</ixx>
+          <iyy>0.003</iyy>
+          <izz>0.005</izz>
+        </inertia>
+      </inertial>
+      <visual name="left_wheel_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.1</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1.0</ambient>
+          <diffuse>0.1 0.1 0.1 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="left_wheel_collision">
+        <geometry>
+          <cylinder>
+            <radius>0.1</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Right Wheel -->
+    <link name="right_wheel">
+      <pose>0 -0.22 -0.05 1.5708 0 0</pose>
+      <inertial>
+        <mass>1.5</mass>
+        <inertia>
+          <ixx>0.003</ixx>
+          <iyy>0.003</iyy>
+          <izz>0.005</izz>
+        </inertia>
+      </inertial>
+      <visual name="right_wheel_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.1</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1.0</ambient>
+          <diffuse>0.1 0.1 0.1 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="right_wheel_collision">
+        <geometry>
+          <cylinder>
+            <radius>0.1</radius>
+            <length>0.04</length>
+          </cylinder>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Front Caster Wheel (Passive Support) -->
+    <link name="front_caster">
+      <pose>0.22 0 -0.1 0 0 0</pose>
+      <inertial>
+        <mass>0.5</mass>
+        <inertia>
+          <ixx>0.0005</ixx>
+          <iyy>0.0005</iyy>
+          <izz>0.0005</izz>
+        </inertia>
+      </inertial>
+      <visual name="front_caster_visual">
+        <geometry>
+          <sphere>
+            <radius>0.05</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.6 0.6 0.6 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="front_caster_collision">
+        <geometry>
+          <sphere>
+            <radius>0.05</radius>
+          </sphere>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Rear Caster Wheel (Passive Support) -->
+    <link name="rear_caster">
+      <pose>-0.22 0 -0.1 0 0 0</pose>
+      <inertial>
+        <mass>0.5</mass>
+        <inertia>
+          <ixx>0.0005</ixx>
+          <iyy>0.0005</iyy>
+          <izz>0.0005</izz>
+        </inertia>
+      </inertial>
+      <visual name="rear_caster_visual">
+        <geometry>
+          <sphere>
+            <radius>0.05</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1.0</ambient>
+          <diffuse>0.6 0.6 0.6 1.0</diffuse>
+        </material>
+      </visual>
+      <collision name="rear_caster_collision">
+        <geometry>
+          <sphere>
+            <radius>0.05</radius>
+          </sphere>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Joints -->
+    <joint name="left_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>left_wheel</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <joint name="right_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>right_wheel</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <joint name="front_caster_joint" type="ball">
+      <parent>base_link</parent>
+      <child>front_caster</child>
+    </joint>
+
+    <joint name="rear_caster_joint" type="ball">
+      <parent>base_link</parent>
+      <child>rear_caster</child>
+    </joint>
+
+  </model>
+</sdf>

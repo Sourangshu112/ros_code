@@ -19,8 +19,8 @@ services:
       - PYTHONUNBUFFERED=1
       - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
-               ros2 run amr_core peer_node --ros-args -r __node:=robot_1"
+      bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
+               ros2 run amr_core peer_node --ros-args -r __node:=robot_1 __ns:=/robot_1"
 
   robot_2:
     build: .
@@ -33,8 +33,8 @@ services:
       - PYTHONUNBUFFERED=1
       - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
-              ros2 run amr_core peer_node --ros-args -r __node:=robot_2"
+      bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
+              ros2 run amr_core peer_node --ros-args -r __node:=robot_2 __ns:=/robot_2"
 
   robot_3:
     build: .
@@ -47,8 +47,8 @@ services:
       - PYTHONUNBUFFERED=1
       - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
-               ros2 run amr_core peer_node --ros-args -r __node:=robot_3"
+      bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
+               ros2 run amr_core peer_node --ros-args -r __node:=robot_3 __ns:=/robot_3"
 
   dashboard_backend:
     build: .
@@ -63,5 +63,5 @@ services:
       - PYTHONUNBUFFERED=1
       - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
     command: >
-      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
+      bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
                ros2 run fleet_dashboard dashboard_node"
