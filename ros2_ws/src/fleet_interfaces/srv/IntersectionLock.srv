@@ -1,0 +1,6 @@
+string robot_id
+string intersection_id
+uint8 priority_score
+---
+bool lock_granted
+float32 wait_time_seconds

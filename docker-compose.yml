@@ -1,0 +1,67 @@
+version: '3.8'
+
+networks:
+  mesh_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.50.0/24
+
+services:
+  robot_1:
+    build: .
+    container_name: robot_1
+    networks:
+      - mesh_net
+    environment:
+      - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+      - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
+      - PYTHONUNBUFFERED=1
+      - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
+               ros2 run amr_core peer_node --ros-args -r __node:=robot_1"
+
+  robot_2:
+    build: .
+    container_name: robot_2
+    networks:
+      - mesh_net
+    environment:
+      - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+      - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
+      - PYTHONUNBUFFERED=1
+      - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
+              ros2 run amr_core peer_node --ros-args -r __node:=robot_2"
+
+  robot_3:
+    build: .
+    container_name: robot_3
+    networks:
+      - mesh_net
+    environment:
+      - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+      - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
+      - PYTHONUNBUFFERED=1
+      - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
+               ros2 run amr_core peer_node --ros-args -r __node:=robot_3"
+
+  dashboard_backend:
+    build: .
+    container_name: dashboard_backend
+    networks:
+      - mesh_net
+    ports:
+      - "5000:5000"
+    environment:
+      - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+      - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
+      - PYTHONUNBUFFERED=1
+      - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
+    command: >
+      bash -c "source /opt/ros/jazzy/setup.bash && source /app/ros2_ws/install/setup.bash &&
+               ros2 run fleet_dashboard dashboard_node"

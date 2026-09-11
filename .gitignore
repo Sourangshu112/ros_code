@@ -1,0 +1,67 @@
+# ==========================================
+# ROS 2 Build & Workspace Directories
+# ==========================================
+build/
+install/
+log/
+
+# ==========================================
+# Colcon & Ament Build System Flags
+# ==========================================
+COLCON_IGNORE
+AMENT_IGNORE
+
+# ==========================================
+# C++ / CMake Generated Files
+# ==========================================
+*.o
+*.so
+*.a
+*.la
+*.lo
+*.dylib
+CMakeFiles/
+CMakeCache.txt
+CMakeLists.txt.user*
+cmake_install.cmake
+
+# ==========================================
+# Python Artifacts
+# ==========================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.tox/
+.venv
+venv/
+ENV/
+
+# ==========================================
+# IDEs and Text Editors
+# ==========================================
+# VS Code
+.vscode/
+
+# QtCreator
+qtcreator-*
+*.user
+
+# CLion / IntelliJ
+.idea/
+
+# Eclipse
+.project
+.cproject
+.settings/
+
+# Backup and swap files
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Dockerfiles
+Dockerfile:Zone.Identifier
+docker-compose.yml:Zone.Identifier 

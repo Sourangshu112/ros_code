@@ -1,0 +1,2 @@
+string robot_id
+uint32 uptime_sec

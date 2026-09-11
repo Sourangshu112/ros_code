@@ -1,0 +1,4 @@
+string robot_id
+string current_zone
+geometry_msgs/Point32[] future_waypoints
+bool wide_footprint_active
