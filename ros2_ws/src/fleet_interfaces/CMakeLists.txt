@@ -15,6 +15,7 @@ find_package(action_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Pose2D.msg"
   "msg/AMRTelemetry.msg"
   "msg/LocalTrajectory.msg"
   "msg/TaskBid.msg"

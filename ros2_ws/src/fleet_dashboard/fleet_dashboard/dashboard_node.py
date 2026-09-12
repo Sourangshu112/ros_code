@@ -1,11 +1,17 @@
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
 import threading
 from flask import Flask
 from flask_socketio import SocketIO
+import sqlite3
+import json
+from datetime import datetime
+from fleet_dashboard.storage_manager import init_db, listener
+import zenoh
 
-from fleet_interfaces.msg import AMRTelemetry, DispatchTask
-from geometry_msgs.msg import Pose2D
+from fleet_interfaces.msg import AMRTelemetry, DispatchTask, TaskBid
+from fleet_interfaces.msg import Pose2D
 
 # Initialize Flask and SocketIO
 app = Flask(__name__)
@@ -13,14 +19,69 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Global reference to allow Flask to interact with the ROS 2 node
 ros_node_instance = None
+DB_FILE = "/app/data/fleet_ledger.db"
+
+# --- SQLite Database Helper Functions ---
+def db_upsert_task(task_data):
+    """Inserts the new task into the database immediately upon creation."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO tasks_ledger (
+            Task_id, Task, Task_issue_time
+        ) VALUES (?, ?, ?)
+        ON CONFLICT(Task_id) DO UPDATE SET
+            Task = COALESCE(excluded.Task, tasks_ledger.Task),
+            Task_issue_time = COALESCE(excluded.Task_issue_time, tasks_ledger.Task_issue_time)
+    ''', (
+        task_data['Task_id'],
+        json.dumps(task_data['Task']),
+        task_data['Task_issue_time']
+    ))
+    conn.commit()
+    conn.close()
+
+def get_all_tasks_from_db():
+    """Fetches all tasks to populate the frontend on reload."""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row  # Enables column access by name
+    cursor = conn.cursor()
+    
+    # Optional: Filter for only active tasks if you add a status column later
+    cursor.execute("SELECT * FROM tasks_ledger")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    # Convert SQLite rows to a list of dicts, parsing the JSON payload back out
+    tasks = []
+    for row in rows:
+        task_dict = dict(row)
+        if task_dict.get('Task'):
+            task_dict['Task'] = json.loads(task_dict['Task'])
+        tasks.append(task_dict)
+    return tasks
+# ----------------------------------------
 
 class DashboardNode(Node):
     def __init__(self):
         super().__init__('fleet_dashboard')
-        self.subscription = self.create_subscription(AMRTelemetry, 'fleet_status', self.listener_callback, 10)
         
-        # Updated publisher using the custom DispatchTask message
-        self.task_publisher = self.create_publisher(DispatchTask, 'fleet_tasks', 10)
+        # 1. Mesh QoS Profile: Transient Local is REQUIRED so robots connecting 
+        # later will still receive the active tasks.
+        task_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=100
+        )
+        
+        self.subscription = self.create_subscription(AMRTelemetry, '/fleet_status', self.listener_callback, 10)
+        
+        # 2. Listen for bids broadcasted by the AMRs
+        self.bid_subscription = self.create_subscription(TaskBid, '/fleet_tasks_bids', self.bid_callback, 10)
+        
+        # 3. Task publisher using the Transient Local QoS
+        self.task_publisher = self.create_publisher(DispatchTask, '/fleet_tasks', task_qos)
         
         print("[Dashboard] WebSocket Server Active. Listening for mesh data...", flush=True)
 
@@ -32,8 +93,17 @@ class DashboardNode(Node):
             "battery": msg.battery_percent,
             "status" : msg.system_status
         }
-        # print(f"[Backend] Got ROS data: {data['id']} at X:{data['x']}", flush=True)
         socketio.emit('fleet_update', data)
+
+    def bid_callback(self, msg):
+        # Forward the decentralized bid up to the frontend UI
+        bid_data = {
+            "task_id": msg.task_id,
+            "robot_id": msg.robot_id,
+            "bid_cost": msg.bid_cost
+        }
+        print(f"[Dashboard] Received bid from {msg.robot_id} for {msg.task_id}: {msg.bid_cost}", flush=True)
+        socketio.emit('task_bid', bid_data)
 
 # Socket.IO Listener for frontend task dispatch
 @socketio.on('issue_task')
@@ -43,11 +113,21 @@ def handle_issue_task(payload):
         return
 
     try:
-        # Construct the custom message from the incoming JSON payload
-        msg = DispatchTask()
-        msg.task_id = payload.get('task_id', 'UNKNOWN_TASK')
-        msg.is_priority = payload.get('priority', False)
+        task_id = payload.get('task_id', f"TASK_{int(datetime.now().timestamp())}")
+        
+        # 1. Update Database FIRST
+        task_data = {
+            "Task_id": task_id,
+            "Task": payload,
+            "Task_issue_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        db_upsert_task(task_data)
+        print(f"[Dashboard] Task {task_id} saved to SQLite.", flush=True)
 
+        # 2. Start Broadcast
+        msg = DispatchTask()
+        msg.task_id = task_id
+        msg.is_priority = payload.get('priority', False)
         msg.pickup_coordinates = Pose2D(
             x=float(payload['pickup'][0]),
             y=float(payload['pickup'][1]),
@@ -64,6 +144,25 @@ def handle_issue_task(payload):
         
     except KeyError as e:
         print(f"[Backend] Malformed task payload missing key: {e}", flush=True)
+    except Exception as e:
+        print(f"[Backend] DB/ROS Error: {e}", flush=True)
+
+# 3. Listen on the frontend reload to repopulate the UI
+@socketio.on('request_initial_state')
+def handle_initial_state():
+    print("[Dashboard] Frontend connected. Serving historical state from DB...", flush=True)
+    tasks = get_all_tasks_from_db()
+    
+    # Emit all past/current tasks directly to the client that just connected
+    socketio.emit('initial_state_response', {"tasks": tasks})
+
+def zenoh_mesh_callback(sample: zenoh.Sample):
+    # 1. Update SQLite using your existing storage_manager logic
+    listener(sample)
+    
+    # 2. Fetch the newly updated tasks and push them to the frontend
+    tasks = get_all_tasks_from_db()
+    socketio.emit('initial_state_response', {"tasks": tasks})
 
 def ros_spin_thread():
     global ros_node_instance
@@ -76,6 +175,11 @@ def ros_spin_thread():
     rclpy.shutdown()
 
 def main(args=None):
+    init_db()
+
+    z_session = zenoh.open(zenoh.Config())
+    z_session.declare_subscriber("fleet/tasks/ledger/**", zenoh_mesh_callback)
+
     # 1. Start ROS 2 node in a background thread
     threading.Thread(target=ros_spin_thread, daemon=True).start()
     

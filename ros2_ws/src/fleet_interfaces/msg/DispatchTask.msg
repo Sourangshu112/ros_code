@@ -1,4 +1,4 @@
 string task_id
-geometry_msgs/Pose2D pickup_coordinates
-geometry_msgs/Pose2D drop_coordinates
+Pose2D pickup_coordinates
+Pose2D drop_coordinates
 bool is_priority
