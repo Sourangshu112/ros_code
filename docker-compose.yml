@@ -14,6 +14,7 @@ services:
     networks:
       - mesh_net
     environment:
+      - GZ_RELAY=192.168.50.1
       - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
       - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
       - PYTHONUNBUFFERED=1
@@ -28,6 +29,7 @@ services:
     networks:
       - mesh_net
     environment:
+      - GZ_RELAY=192.168.50.1
       - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
       - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
       - PYTHONUNBUFFERED=1
@@ -42,6 +44,7 @@ services:
     networks:
       - mesh_net
     environment:
+      - GZ_RELAY=192.168.50.1
       - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
       - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
       - PYTHONUNBUFFERED=1

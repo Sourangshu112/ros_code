@@ -1,5 +1,6 @@
 string task_id
-Pose2D target_destination
+fleet_interfaces/Pose2D pickup_point
+fleet_interfaces/Pose2D drop_point
 ---
 bool success
 string failure_reason
