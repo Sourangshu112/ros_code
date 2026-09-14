@@ -52,6 +52,10 @@ class CBBANode:
         self.Z = [-1 for _ in range(num_tasks)]        # current claimed winner per task
         self.T = [0 for _ in range(num_robots)]        # last-updated timestamp per robot
 
+        # Live execution tracking — which leg of bundle[0] we're on.
+        # False = still driving to pickup. Flips to True once pickup
+        # is reached, then advance_leg() pops the task on drop.
+        self._pickup_done = False
 
     # Kinematic Helpers
     def _calc_rotation_time(self, target_x, target_y, origin_x=None, origin_y=None, origin_theta=None):
@@ -283,3 +287,48 @@ class CBBANode:
             v_theta = self._final_heading_after_task(best_task)
  
         return self.bundle
+
+        # Live Execution Tracking
+    def current_target(self):
+        """
+        (x, y, is_pickup) for wherever this robot should drive next,
+        or None if the bundle is empty. is_pickup is True while still
+        headed to pick_x/pick_y, False once redirected to the drop point.
+        """
+        if not self.bundle:
+            return None
+        task = self.bundle[0]
+        if not self._pickup_done:
+            return task["pick_x"], task["pick_y"], True
+        return task["drop_x"], task["drop_y"], False
+
+    def advance_leg(self):
+        """
+        Call when LocalPlanner's on_goal_reached fires. First call
+        flips pickup -> drop on the current task. Second call pops
+        the finished task off the bundle and resets for the next one.
+
+        Signature matches on_goal_reached exactly (no args), so it
+        can be passed straight in:
+            LocalPlanner(..., on_goal_reached=agent.advance_leg)
+        """
+        if not self.bundle:
+            return
+        if not self._pickup_done:
+            self._pickup_done = True
+        else:
+            self.bundle.pop(0)
+            self._pickup_done = False
+
+    def abandon_current_task(self):
+        """
+        Drops bundle[0] outright without treating it as completed —
+        for when the controller finds the target unreachable (e.g.
+        is_valid_cell fails) rather than actually having driven there.
+        Keeps that reset out of the controller's hands, which would
+        otherwise have to poke _pickup_done directly.
+        """
+        if not self.bundle:
+            return
+        self.bundle.pop(0)
+        self._pickup_done = False
