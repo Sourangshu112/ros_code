@@ -2,7 +2,7 @@ string robot_id
 Pose2D pose
 float32 linear_velocity
 float32 angular_velocity
-uint8 battery_percent
+float32 battery_percent
 uint8 system_status
 bool is_busy
 string current_task_id

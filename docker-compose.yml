@@ -13,6 +13,8 @@ services:
     container_name: robot_1
     networks:
       - mesh_net
+    ports:
+      - "7447:7447"
     environment:
       - GZ_RELAY=192.168.50.1
       - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
@@ -28,6 +30,8 @@ services:
     container_name: robot_2
     networks:
       - mesh_net
+    ports:
+      - "7448:7447"
     environment:
       - GZ_RELAY=192.168.50.1
       - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
@@ -43,6 +47,8 @@ services:
     container_name: robot_3
     networks:
       - mesh_net
+    ports:
+      - "7449:7447"
     environment:
       - GZ_RELAY=192.168.50.1
       - ZENOH_ROUTER_CHECK_ATTEMPTS=-1

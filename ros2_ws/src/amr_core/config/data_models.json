@@ -1,0 +1,14 @@
+{
+  "system_constants": {
+    "v_linear": 2.0,
+    "v_angular": 1.57,
+    "e_rate": 1.0,
+    "c_rate": 5.0,
+    "lambda_val": 0.05,
+    "battery_safety_threshold": 20.0,
+    "charging_station": {
+      "x": 7.0,
+      "y": 15.0
+    }
+  }
+}

@@ -5,6 +5,8 @@ import json
 from datetime import datetime
 from geometry_msgs.msg import Twist
 
+from amr_core.local_planner import LocalPlanner
+
 def execute_physical_task(node, task_msg):
     """
     Executes the physical movement for the AMR in a separate thread.
@@ -20,7 +22,7 @@ def execute_physical_task(node, task_msg):
     move_to_point(node, cmd_pub, task_msg.pickup_coordinates.x, task_msg.pickup_coordinates.y)
     
     node.get_logger().info(f"[{task_id}] Arrived at pickup. Loading pallet...")
-    #time.sleep(2.0)  # Simulate the time it takes to lift the pallet
+    time.sleep(2.0)  # Simulate the physical time it takes to lift the pallet
     
     # 2. Log Task Start Time to Zenoh (Task officially begins once pallet is loaded)
     node.ledger_data[task_id]["Task_starting_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -31,50 +33,51 @@ def execute_physical_task(node, task_msg):
     move_to_point(node, cmd_pub, task_msg.drop_coordinates.x, task_msg.drop_coordinates.y)
 
     node.get_logger().info(f"[{task_id}] Arrived at drop-off. Unloading...")
-    #time.sleep(2.0)  # Simulate dropping the pallet
+    time.sleep(2.0)  # Simulate the physical time it takes to drop the pallet
     
     # 4. Trigger Task Completion
     node.finish_task(task_id)
+
 def move_to_point(node, cmd_pub, target_x, target_y):
-    """Basic Proportional (P) controller for differential drive navigation."""
-    vel_msg = Twist()
-    loop_count = 0
+    """Integrates A* global navigation with local proportional waypoint following."""
+    # Use the node's global navigator and initialize a fresh local driver
+    navigator = node.global_navigator
+    local_driver = LocalPlanner(v_max=0.5, omega_max=1.0)
     
-    # Prevents crash on Ctrl+C by stopping the loop when ROS shuts down
-    while rclpy.ok():
-        # Calculate distance and angle to target
-        dx = target_x - node.current_x
-        dy = target_y - node.current_y
-        distance = math.sqrt(dx**2 + dy**2)
+    # 1. Convert Gazebo world meters to costmap grid pixels
+    start_col, start_row = navigator.world_to_grid(node.current_x, node.current_y)
+    target_col, target_row = navigator.world_to_grid(target_x, target_y)
+    
+    # 2. Generate optimal path avoiding obstacles
+    grid_path = navigator.find_path((start_col, start_row), (target_col, target_row))
+    if not grid_path:
+        node.get_logger().error(f"No valid path to target ({target_x}, {target_y}) found!")
+        return
         
-        # Print diagnostic data every ~2 seconds (20 iterations at 0.1s sleep)
-        if loop_count % 20 == 0:
-            node.get_logger().info(f"Tracking... Current: ({node.current_x:.2f}, {node.current_y:.2f}) | Target: ({target_x:.2f}, {target_y:.2f}) | Distance: {distance:.2f}m")
-        loop_count += 1
+    # 3. Convert grid pixel path back to Gazebo world meters for the hardware driver
+    world_path = [navigator.grid_to_world(col, row) for col, row in grid_path]
+    
+    # 4. Hand physical path to the local hardware controller
+    local_driver.on_path(world_path)
+    
+    vel_msg = Twist()
+    
+    # 5. Step the controller at a fixed 10Hz rate
+    while rclpy.ok() and local_driver.is_active:
+        # Sync real-time Gazebo coordinates into the planner
+        local_driver.on_odometry(node.current_x, node.current_y, theta=node.current_yaw)
         
-        # Stop condition
-        if distance < 0.2:  
-            node.get_logger().info("Target reached!")
-            break
-            
-        target_heading = math.atan2(dy, dx)
-        heading_error = target_heading - node.current_yaw
+        # Fetch computed velocities
+        v, omega = local_driver.step()
         
-        # Normalize the angle between -pi and pi
-        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))
-        
-        # Control Logic: Rotate first if heavily misaligned, otherwise drive and correct
-        if abs(heading_error) > 0.2:
-            vel_msg.linear.x = 0.0
-            vel_msg.angular.z = 0.5 if heading_error > 0 else -0.5
-        else:
-            vel_msg.linear.x = min(0.5, distance)  # Cap max speed at 0.5 m/s
-            vel_msg.angular.z = 0.5 * heading_error
-            
+        vel_msg.linear.x = v
+        vel_msg.angular.z = omega
         cmd_pub.publish(vel_msg)
-        time.sleep(0.1) # Run loop at roughly 10Hz
         
-    # Stop the robot when target is reached or ROS shuts down
+        time.sleep(0.1)  
+        
+    # Stop the AMR when the target is reached or ROS shuts down
     vel_msg.linear.x = 0.0
     vel_msg.angular.z = 0.0
     cmd_pub.publish(vel_msg)
+    node.get_logger().info("Waypoint sequence completed.")

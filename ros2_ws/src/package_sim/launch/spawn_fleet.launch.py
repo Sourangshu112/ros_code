@@ -42,15 +42,20 @@ def generate_launch_description():
         
         # Bridge the Gazebo topics to ROS 2 topics under the robot's specific namespace
         bridge_node = Node(
-            package='ros_gz_bridge',
-            executable='parameter_bridge',
-            arguments=[
-                f"/{robot['name']}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-                # f"/{robot['name']}/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
-                f"/{robot['name']}/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry"
-            ],
-            output='screen'
-        )
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=[
+            # Target the exact topics your gz topic -l command revealed
+            f"/model/{robot['name']}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+            f"/model/{robot['name']}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry"
+        ],
+        remappings=[
+            # Translate the Gazebo topics into the ROS topics peer_node expects
+            (f"/model/{robot['name']}/cmd_vel", f"/{robot['name']}/cmd_vel"),
+            (f"/model/{robot['name']}/odometry", f"/{robot['name']}/odom")
+        ],
+        output='screen'
+    )
         
         nodes.append(spawn_node)
         nodes.append(bridge_node)

@@ -1,16 +1,18 @@
 import json
 import math
 import os
+from ament_index_python.packages import get_package_share_directory
 
 # Load master configuration
-_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_models.json")
+
+_SHARE_DIR = get_package_share_directory('amr_core')
+_CONFIG_PATH = os.path.join(_SHARE_DIR, 'config', 'data_models.json')
 
 with open(_CONFIG_PATH, "r") as _f:
     _CONFIG = json.load(_f)
 
 SYSTEM_CONSTANTS = _CONFIG["system_constants"]
-FLEET_STATE = _CONFIG["fleet_state"]
-OPEN_TASKS = _CONFIG["open_tasks"]
+
 
 V_LINEAR = SYSTEM_CONSTANTS["v_linear"]
 V_ANGULAR = SYSTEM_CONSTANTS["v_angular"]
@@ -32,7 +34,7 @@ class CBBANode:
     the fly, once its battery crosses a safety threshold.
     """
 
-    def __init__(self, robot_dict, num_tasks, num_robots):
+    def __init__(self, robot_dict, num_tasks, num_robots, navigator=None):
         # Physical State
         self.id = robot_dict["id"]
         self.x = robot_dict["x"]
@@ -48,14 +50,17 @@ class CBBANode:
         self.bundle = []
 
         # The Memory Matrices (Ledgers)
-        self.Y = [0.0 for _ in range(num_tasks)]      # highest known bid per task
-        self.Z = [-1 for _ in range(num_tasks)]        # current claimed winner per task
-        self.T = [0 for _ in range(num_robots)]        # last-updated timestamp per robot
+        self.Y = {}  # highest known bid per task (task_id -> bid)
+        self.Z = {}  # current claimed winner per task (task_id -> robot_id)
+        self.T = {}  # last-updated timestamp per robot (robot_id -> timestamp)
 
         # Live execution tracking — which leg of bundle[0] we're on.
         # False = still driving to pickup. Flips to True once pickup
         # is reached, then advance_leg() pops the task on drop.
         self._pickup_done = False
+
+        # Global path planner for obstacle-aware bidding
+        self.navigator = navigator
 
     # Kinematic Helpers
     def _calc_rotation_time(self, target_x, target_y, origin_x=None, origin_y=None, origin_theta=None):
@@ -77,17 +82,53 @@ class CBBANode:
             angle_diff = (2 * math.pi) - angle_diff
         return angle_diff / V_ANGULAR
 
+    # def _calc_travel_time(self, target_x, target_y, origin_x=None, origin_y=None):
+    #     """
+    #     Time to drive in a straight line to (target_x, target_y).
+
+    #     Same origin-override behavior as _calc_rotation_time, for the
+    #     same reason: chained legs don't start from the robot's real x/y.
+    #     """
+    #     ox = self.x if origin_x is None else origin_x
+    #     oy = self.y if origin_y is None else origin_y
+
+    #     distance = math.hypot(target_x - ox, target_y - oy)
+    #     acceleration_penalty = 1.0 if distance > 0 else 0.0
+    #     return (distance / V_LINEAR) + acceleration_penalty
+
+
     def _calc_travel_time(self, target_x, target_y, origin_x=None, origin_y=None):
         """
-        Time to drive in a straight line to (target_x, target_y).
-
-        Same origin-override behavior as _calc_rotation_time, for the
-        same reason: chained legs don't start from the robot's real x/y.
+        Time to drive to (target_x, target_y) utilizing the A* global navigator.
         """
         ox = self.x if origin_x is None else origin_x
         oy = self.y if origin_y is None else origin_y
 
-        distance = math.hypot(target_x - ox, target_y - oy)
+        if self.navigator is None:
+            # Fallback if no navigator is provided
+            distance = math.hypot(target_x - ox, target_y - oy)
+        else:
+            # Convert world meters to costmap grid pixels
+            start_col, start_row = self.navigator.world_to_grid(ox, oy)
+            target_col, target_row = self.navigator.world_to_grid(target_x, target_y)
+            
+            # Generate optimal path avoiding obstacles
+            grid_path = self.navigator.find_path((start_col, start_row), (target_col, target_row))
+            
+            if not grid_path:
+                # If target is completely unreachable, return infinite time so the bid drops to 0
+                return float('inf')
+                
+            # Convert pixel path back to world meters to measure exact real-world distance
+            world_path = [self.navigator.grid_to_world(c, r) for c, r in grid_path]
+            
+            # Sum the distance between consecutive waypoints
+            distance = 0.0
+            for i in range(1, len(world_path)):
+                prev_x, prev_y = world_path[i-1]
+                curr_x, curr_y = world_path[i]
+                distance += math.hypot(curr_x - prev_x, curr_y - prev_y)
+
         acceleration_penalty = 1.0 if distance > 0 else 0.0
         return (distance / V_LINEAR) + acceleration_penalty
 
@@ -150,6 +191,32 @@ class CBBANode:
         """
         return math.atan2(task["drop_y"] - task["pick_y"], task["drop_x"] - task["pick_x"])
         
+    def update_consensus(self, sender_id, recv_Y, recv_Z, recv_T):
+        """
+        Ingests broadcasted matrices and resolves conflicts deterministically.
+        """
+        import time
+        self.T[sender_id] = time.time()
+
+        for task_id, sender_bid in recv_Y.items():
+            # If the task is entirely new to us, initialize it in our ledgers
+            if task_id not in self.Y:
+                self.Y[task_id] = 0.0
+                self.Z[task_id] = ""
+
+            local_bid = self.Y[task_id]
+            sender_winner = recv_Z.get(task_id, "")
+            
+            # CBBA Rule: If broadcasted bid is higher, overwrite local memory
+            if sender_bid > local_bid:
+                self.Y[task_id] = sender_bid
+                self.Z[task_id] = sender_winner
+                
+            # Tie-breaker: If bids are identical, sort IDs alphabetically to prevent deadlocks
+            elif sender_bid == local_bid and sender_bid > 0:
+                if sender_winner < self.Z[task_id]:
+                    self.Z[task_id] = sender_winner
+
     # Bidding
     def calculate_bid_from_tau(self, task, tau, battery = None):
         """

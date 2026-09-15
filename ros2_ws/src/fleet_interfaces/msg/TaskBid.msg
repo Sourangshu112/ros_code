@@ -1,3 +1,4 @@
-string task_id
 string robot_id
-float32 bid_cost
+string y_matrix
+string z_matrix
+string t_matrix
