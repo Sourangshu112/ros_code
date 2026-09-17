@@ -113,42 +113,46 @@ class LocalPlanner:
         (10-20 Hz) from a timer. Returns (v, omega) to publish to the
         motor controller layer.
         """
-        # 1. Failsafe -- no active path means no motion, no exceptions
+        # 1. Failsafe -- no active path means no motion
         if not self.is_active:
             return 0.0, 0.0
-
-        # 2. Goal reached -- no waypoints left to target
-        if self.current_target_index >= len(self.waypoint_array):
-            self.is_active = False
-            if self.on_goal_reached is not None:
-                self.on_goal_reached()
-            return 0.0, 0.0
-
-        # 3. Fetch target, compute distance and heading error
+    
+        # 2, 3, 4. Dynamic Lookahead logic (Pure Pursuit)
+        # Advance the target until it is at least 1.0 meter ahead,
+        # but do not advance past the very last waypoint in the array.
+        while self.current_target_index < len(self.waypoint_array) - 1:
+            x_t, y_t = self.waypoint_array[self.current_target_index]
+            d = math.hypot(x_t - self.x, y_t - self.y)
+            
+            # If the waypoint is closer than our 1.0m lookahead, skip it
+            if d < 1.0:
+                self.current_target_index += 1
+            else:
+                break
+            
+        # Compute errors for the selected lookahead waypoint
         x_t, y_t = self.waypoint_array[self.current_target_index]
         dx = x_t - self.x
         dy = y_t - self.y
         d = math.hypot(dx, dy)
+    
+        # Final goal reached check
+        if self.current_target_index >= len(self.waypoint_array) - 1 and d < self.d_tolerance:
+            self.is_active = False
+            if self.on_goal_reached is not None:
+                self.on_goal_reached()
+            return 0.0, 0.0
+    
         theta_desired = math.atan2(dy, dx)
         e_theta = normalize_angle(theta_desired - self.theta)
-
-        # 4. Waypoint reached -- advance and stop for this tick.
-        # Note: this publishes (0, 0) for one control cycle at every
-        # waypoint transition rather than immediately chasing the next
-        # target in the same tick. Simple and matches the spec as
-        # given; if that causes visible stutter at 10-20 Hz once this
-        # is on real hardware, the fix is to loop back to step 3
-        # instead of returning here.
-        if d < self.d_tolerance:
-            self.current_target_index += 1
-            return 0.0, 0.0
-
+    
         # 5. Proportional control
         omega = self.k_omega * e_theta
         v = self.k_v * d * math.cos(e_theta)
+        
         if v < 0:
-            v = 0.0  # spin in place rather than reverse into the target
-
+            v = 0.0  # spin in place rather than reverse
+    
         # 6. Kinematic clamps
         if v > self.v_max:
             v = self.v_max
@@ -156,6 +160,6 @@ class LocalPlanner:
             omega = self.omega_max
         if omega < -self.omega_max:
             omega = -self.omega_max
-
+    
         # 7. Hand the command back for the outer layer to publish
         return v, omega

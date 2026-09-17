@@ -56,7 +56,7 @@ def execute_physical_tasks(node):
             continue
             
         node.get_logger().info(f"[{task_id}] Arrived at pickup. Loading...")
-        time.sleep(2.0)  
+        time.sleep(10.0)  
         
         node.ledger_data[task_id]["Task_starting_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         node.z_session.put(f"fleet/tasks/ledger/{task_id}", json.dumps(node.ledger_data[task_id]))
@@ -73,7 +73,7 @@ def execute_physical_tasks(node):
             continue
             
         node.get_logger().info(f"[{task_id}] Arrived at drop-off. Unloading...")
-        time.sleep(2.0)  
+        time.sleep(10.0)  
         
         node.agent.advance_leg()
         node.finish_task(task_id)

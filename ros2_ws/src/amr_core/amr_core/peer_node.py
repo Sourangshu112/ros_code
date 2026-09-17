@@ -50,6 +50,7 @@ class PeerNode(Node):
         self.current_yaw = self.offset_theta
 
         self.is_driving = False
+        self.active_trajectory = []
         
         # Internal memory
         self.task_registry = {}  
