@@ -14,25 +14,47 @@ import os
 # Import custom messages
 from fleet_interfaces.msg import AMRTelemetry, DispatchTask, TaskBid
 from fleet_interfaces.msg import Pose2D
+from fleet_interfaces.msg import LocalTrajectory
+from geometry_msgs.msg import Point32
 from nav_msgs.msg import Odometry
 
 # External scripts
-from amr_core.amr_controller import execute_physical_task
+from amr_core.amr_controller import execute_physical_tasks
 from amr_core.cbba_agent import CBBANode
 from amr_core.navigator import AStarPlanner
 
 class PeerNode(Node):
     def __init__(self):
         super().__init__('peer_node')
+
+        # 1. Declare ROS 2 parameters for absolute spawn coordinates
+        self.declare_parameter('spawn_x', 0.0)
+        self.declare_parameter('spawn_y', 0.0)
+        self.declare_parameter('spawn_theta', 0.0)
+
+
+
+        # 2. Fetch the values
+        self.offset_x = self.get_parameter('spawn_x').value
+        self.offset_y = self.get_parameter('spawn_y').value
+        self.offset_theta = self.get_parameter('spawn_theta').value
+
+        # print(f"x: {self.offset_x}, y: {self.offset_y}", flush=True)
         
-        self.is_busy = False 
-        self.current_x = 0.0
-        self.current_y = 0.0
-        self.current_yaw = 0.0
+        self.is_busy = False
+        self.current_task_id = ""
+
+        # 3. Initialize current coordinates to the offset instead of 0.0
+        self.current_x = self.offset_x
+        self.current_y = self.offset_y
+        self.current_yaw = self.offset_theta
+
+        self.is_driving = False
         
         # Internal memory
         self.task_registry = {}  
-        self.ledger_data = {} 
+        self.ledger_data = {}
+        self.pending_bids = {} 
 
         # Initialize the Global Navigator using the costmap file
         share_dir = get_package_share_directory('amr_core')
@@ -42,9 +64,9 @@ class PeerNode(Node):
         # Initialize CBBA Agent
         robot_dict = {
             "id": self.get_name(), 
-            "x": 0.0, 
-            "y": 0.0, 
-            "theta": 0.0, 
+            "x": self.offset_x, 
+            "y": self.offset_y, 
+            "theta": self.offset_theta, 
             "battery": 100.0
         }
         self.agent = CBBANode(robot_dict, num_tasks=0, num_robots=3, navigator=self.global_navigator)
@@ -61,6 +83,8 @@ class PeerNode(Node):
         # Publishers and Subscribers
         self.telemetry_pub = self.create_publisher(AMRTelemetry, '/fleet_status', 10)
         self.bid_pub = self.create_publisher(TaskBid, '/fleet_tasks_bids', 10) 
+        self.traj_pub = self.create_publisher(LocalTrajectory, '/fleet_trajectories', 10)
+        self.traj_timer = self.create_timer(1.5, self.publish_trajectory)
         self.task_sub = self.create_subscription(DispatchTask, '/fleet_tasks', self.on_new_task_received, task_qos)
         self.bid_sub = self.create_subscription(TaskBid, '/fleet_tasks_bids', self.on_bid_received, 10)
         self.odom_sub = self.create_subscription(Odometry, f'/{self.get_name()}/odom', self.odom_callback, qos_profile_sensor_data)
@@ -69,12 +93,14 @@ class PeerNode(Node):
         self.get_logger().info(f"[{self.get_name()}] Peer Node Online. Ready for tasks.")
 
     def odom_callback(self, msg: Odometry):
-        self.current_x = msg.pose.pose.position.x
-        self.current_y = msg.pose.pose.position.y
+        self.current_x = msg.pose.pose.position.x + self.offset_x
+        self.current_y = msg.pose.pose.position.y + self.offset_y
         q = msg.pose.pose.orientation
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
         self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
+
+        self.current_yaw = math.atan2(siny_cosp, cosy_cosp) + self.offset_theta
         
         # Update CBBA Agent's physical state so future bids are accurate
         self.agent.x = self.current_x
@@ -86,19 +112,51 @@ class PeerNode(Node):
         msg.robot_id = self.get_name()
         msg.pose = Pose2D(x=self.current_x, y=self.current_y, theta=self.current_yaw)
         msg.battery_percent = self.agent.battery
-        msg.system_status = 1 if self.is_busy else 0
+        msg.system_status = 1 if self.is_driving else 0
+        msg.is_busy = self.is_busy
+        if self.agent.bundle:
+            msg.current_task_id = self.agent.bundle[0]['id']
+        else:
+            msg.current_task_id = "IDLE"
         self.telemetry_pub.publish(msg)
+
+    def publish_trajectory(self):
+        # Only publish if driving and a valid path sequence exists
+        if self.is_driving and self.active_trajectory:
+            traj_msg = LocalTrajectory()
+            traj_msg.robot_id = self.get_name()
+            
+            waypoints = []
+            for (wx, wy) in self.active_trajectory:
+                pt = Point32()
+                pt.x = float(wx)
+                pt.y = float(wy)
+                pt.z = 0.0
+                waypoints.append(pt)
+                
+            traj_msg.future_waypoints = waypoints
+            self.traj_pub.publish(traj_msg)
+            # print(waypoints, flush=True);
 
     def on_new_task_received(self, msg: DispatchTask):
         self.get_logger().info(f"New task broadcast received: {msg.task_id}")
         
-        if self.is_busy:
-            self.get_logger().info(f"Busy. Ignoring task {msg.task_id}.")
+        # Max Bundle Size Limit
+        if len(self.agent.bundle) >= 3:
+            self.get_logger().info(f"Bundle full. Ignoring task {msg.task_id}.")
             return
             
         self.task_registry[msg.task_id] = msg
-            
-        # 1. Calculate Bid (CBBA utilizes a reward-based system, highest bid wins)
+        
+        # 1. Determine Virtual Origin (Where will the robot be when it finishes its current bundle?)
+        if not self.agent.bundle:
+            v_x, v_y, v_theta = self.current_x, self.current_y, self.current_yaw
+        else:
+            last_task = self.agent.bundle[-1]
+            v_x = last_task["drop_x"]
+            v_y = last_task["drop_y"]
+            v_theta = self.agent._final_heading_after_task(last_task)
+    
         task_dict = {
             "id": msg.task_id,
             "pick_x": msg.pickup_coordinates.x,
@@ -109,20 +167,26 @@ class PeerNode(Node):
             "t_unload": 2.0,
             "reward": 1000 if msg.is_priority else 100
         }
-        bid_value = self.agent.calculate_bid(
-            task_dict, origin_x=self.current_x, origin_y=self.current_y, origin_theta=self.current_yaw
-        )
         
-        # 2. Update local memory to claim the task initially
+        self.pending_bids[msg.task_id] = task_dict
+    
+        # 2. Calculate bid from the virtual state
+        bid_value = self.agent.calculate_bid(
+            task_dict, origin_x=v_x, origin_y=v_y, origin_theta=v_theta
+        )
+    
+        if bid_value <= 0.0:
+            self.get_logger().warning(f"Task {msg.task_id} unreachable from bundle end. Rejecting.")
+            del self.task_registry[msg.task_id]
+            del self.pending_bids[msg.task_id]
+            return
+            
         self.agent.Y[msg.task_id] = bid_value
         self.agent.Z[msg.task_id] = self.get_name()
         
-        # 3. Broadcast entire memory matrix state
         self.broadcast_matrices()
-        
         self.get_logger().info(f"Submitted bid for {msg.task_id} with score: {bid_value:.2f}")
-        
-        # 4. Localized consensus countdown starts
+        import threading
         threading.Timer(2.0, self.evaluate_consensus, args=[msg.task_id]).start()
 
     def broadcast_matrices(self):
@@ -147,41 +211,48 @@ class PeerNode(Node):
         # Feed into mathematical consensus
         self.agent.update_consensus(msg.robot_id, recv_Y, recv_Z, recv_T)
 
+
     def evaluate_consensus(self, task_id: str):
-        # The localized timer pops. We do not calculate anything here, we just check the ledger.
-        if self.is_busy or task_id not in self.agent.Z:
+        if task_id not in self.agent.Z:
             return
-            
+
         winning_robot = self.agent.Z[task_id]
-        
+
         if winning_robot == self.get_name():
-            self.get_logger().info(f"WON TASK {task_id}! Logging bid completion...")
-            self.is_busy = True
-            
+            self.get_logger().info(f"WON TASK {task_id}! Adding to bundle.")
+
+            # 1. Append task to the sequence
+            task_dict = self.pending_bids.pop(task_id)
+            self.agent.bundle.append(task_dict)
+
+            # 2. Push Zenoh Log
             self.ledger_data[task_id] = {
                 "Task_id": task_id,
                 "Amr_completed": self.get_name(),
                 "Bid_completion_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             self.z_session.put(f"fleet/tasks/ledger/{task_id}", json.dumps(self.ledger_data[task_id]))
-            
-            task_msg = self.task_registry[task_id]
-            threading.Thread(target=execute_physical_task, args=(self, task_msg), daemon=True).start()
-            
+
+            # 3. Start hardware thread ONLY if the robot is idling
+            if not self.is_driving:
+                threading.Thread(target=execute_physical_tasks, args=(self,), daemon=True).start()
+
         else:
             self.get_logger().info(f"Lost task {task_id} to {winning_robot}.")
             if task_id in self.task_registry:
                 del self.task_registry[task_id]
+            if task_id in self.pending_bids:
+                del self.pending_bids[task_id]
 
     def finish_task(self, task_id: str):
         self.get_logger().info(f"COMPLETED TASK {task_id}. Broadcasting final ledger update.")
-        
+
         self.ledger_data[task_id]["Task_completion_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.z_session.put(f"fleet/tasks/ledger/{task_id}", json.dumps(self.ledger_data[task_id]))
-        
+
         del self.task_registry[task_id]
         del self.ledger_data[task_id]
-        self.is_busy = False
+
 
 def main(args=None):
     rclpy.init(args=args)

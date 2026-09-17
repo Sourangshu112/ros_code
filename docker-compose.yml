@@ -23,41 +23,41 @@ services:
       - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
     command: >
       bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
-               ros2 run amr_core peer_node --ros-args -r __node:=robot_1 -r __ns:=/robot_1"
+               ros2 run amr_core peer_node --ros-args -r __node:=robot_1 -r __ns:=/robot_1 -p spawn_x:=-13.0 -p spawn_y:=-1.0"
 
-  robot_2:
-    build: .
-    container_name: robot_2
-    networks:
-      - mesh_net
-    ports:
-      - "7448:7447"
-    environment:
-      - GZ_RELAY=192.168.50.1
-      - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
-      - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
-      - PYTHONUNBUFFERED=1
-      - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
-    command: >
-      bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
-              ros2 run amr_core peer_node --ros-args -r __node:=robot_2 -r __ns:=/robot_2"
+  # robot_2:
+  #   build: .
+  #   container_name: robot_2
+  #   networks:
+  #     - mesh_net
+  #   ports:
+  #     - "7448:7447"
+  #   environment:
+  #     - GZ_RELAY=192.168.50.1
+  #     - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+  #     - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
+  #     - PYTHONUNBUFFERED=1
+  #     - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
+  #   command: >
+  #     bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
+  #             ros2 run amr_core peer_node --ros-args -r __node:=robot_2 -r __ns:=/robot_2 -p spawn_x:=-13.0 -p spawn_y:=-6.0"
 
-  robot_3:
-    build: .
-    container_name: robot_3
-    networks:
-      - mesh_net
-    ports:
-      - "7449:7447"
-    environment:
-      - GZ_RELAY=192.168.50.1
-      - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
-      - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
-      - PYTHONUNBUFFERED=1
-      - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
-    command: >
-      bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
-               ros2 run amr_core peer_node --ros-args -r __node:=robot_3 -r __ns:=/robot_3"
+  # robot_3:
+  #   build: .
+  #   container_name: robot_3
+  #   networks:
+  #     - mesh_net
+  #   ports:
+  #     - "7449:7447"
+  #   environment:
+  #     - GZ_RELAY=192.168.50.1
+  #     - ZENOH_ROUTER_CHECK_ATTEMPTS=-1
+  #     - ZENOH_CONFIG_OVERRIDE=listen/endpoints=["tcp/0.0.0.0:7447"];scouting/multicast/enabled=true
+  #     - PYTHONUNBUFFERED=1
+  #     - RUST_LOG=info,zenoh_transport::unicast::establishment::open=off,zenoh_transport::unicast::manager=error
+  #   command: >
+  #     bash -c "source /opt/ros/lyrical/setup.bash && source /app/ros2_ws/install/setup.bash &&
+  #              ros2 run amr_core peer_node --ros-args -r __node:=robot_3 -r __ns:=/robot_3 -p spawn_x:=-13.0 -p spawn_y:=-11.0"
 
   dashboard_backend:
     build: .

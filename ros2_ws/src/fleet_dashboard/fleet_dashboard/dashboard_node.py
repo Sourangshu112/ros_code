@@ -4,17 +4,19 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPo
 import threading
 from flask import Flask
 from flask_socketio import SocketIO
+from flask_cors import CORS
 import sqlite3
 import json
 from datetime import datetime
 from fleet_dashboard.storage_manager import init_db, listener
 import zenoh
 
-from fleet_interfaces.msg import AMRTelemetry, DispatchTask, TaskBid
+from fleet_interfaces.msg import AMRTelemetry, DispatchTask, TaskBid, LocalTrajectory
 from fleet_interfaces.msg import Pose2D
 
 # Initialize Flask and SocketIO
 app = Flask(__name__)
+CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Global reference to allow Flask to interact with the ROS 2 node
@@ -79,6 +81,8 @@ class DashboardNode(Node):
         
         # 2. Listen for bids broadcasted by the AMRs
         self.bid_subscription = self.create_subscription(TaskBid, '/fleet_tasks_bids', self.bid_callback, 10)
+
+        self.traj_sub = self.create_subscription(LocalTrajectory, '/fleet_trajectories', self.traj_callback, 10)
         
         # 3. Task publisher using the Transient Local QoS
         self.task_publisher = self.create_publisher(DispatchTask, '/fleet_tasks', task_qos)
@@ -90,26 +94,48 @@ class DashboardNode(Node):
             "id": msg.robot_id,
             "x": msg.pose.x,
             "y": msg.pose.y,
+            "theta": msg.pose.theta,
             "battery": msg.battery_percent,
-            "status" : msg.system_status
+            "status": msg.system_status,
+            "is_busy": msg.is_busy,
+            "current_task_id": msg.current_task_id
         }
+        # print(data, flush=True)
         socketio.emit('fleet_update', data)
+
+    def traj_callback(self, msg):
+        # Flatten the Point32 objects into simple [x, y] arrays for JSON
+        path_data = [[pt.x, pt.y] for pt in msg.future_waypoints]
+        socketio.emit('trajectory_update', {
+            "id": msg.robot_id,
+            "path": path_data
+        })
 
     def bid_callback(self, msg):
         # Forward the decentralized bid up to the frontend UI
-        bid_data = {
-            "task_id": msg.task_id,
-            "robot_id": msg.robot_id,
-            "bid_cost": msg.bid_cost
-        }
-        print(f"[Dashboard] Received bid from {msg.robot_id} for {msg.task_id}: {msg.bid_cost}", flush=True)
-        socketio.emit('task_bid', bid_data)
+        try:
+            # Deserialize the CBBA matrices
+            y_matrix = json.loads(msg.y_matrix)
+            z_matrix = json.loads(msg.z_matrix)
+            
+            # Forward the decentralized bid landscape to the frontend UI
+            bid_data = {
+                "robot_id": msg.robot_id,
+                "bids": y_matrix,       # Dictionary of {task_id: bid_score}
+                "winners": z_matrix     # Dictionary of {task_id: winning_robot_id}
+            }
+            
+            # print(f"[Dashboard] Received matrix update from {msg.robot_id}", flush=True)
+            socketio.emit('task_bid', bid_data)
+            
+        except json.JSONDecodeError as e:
+            print(f"[Dashboard] Failed to parse bid matrix: {e}", flush=True)
 
 # Socket.IO Listener for frontend task dispatch
 @socketio.on('issue_task')
 def handle_issue_task(payload):
     if ros_node_instance is None:
-        print("[Backend] Warning: ROS node not ready to publish tasks.", flush=True)
+        # print("[Backend] Warning: ROS node not ready to publish tasks.", flush=True)
         return
 
     try:

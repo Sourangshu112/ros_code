@@ -13,6 +13,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
 RUN pip3 install --break-system-packages \
     flask \
     flask-socketio \
+    flask-cors \
     simple-websocket \
     eclipse-zenoh
 
