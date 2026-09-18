@@ -1,6 +1,6 @@
 """
 local_planner.py
-Hardware-agnostic proportional (P) controller for waypoint following.
+Hardware-agnostic Pure Pursuit controller for waypoint following.
 This module expects an outer layer (a ROS2 node, a Zenoh subscriber, or a test harness) to:
 
   - call on_odometry(...) whenever new pose data arrives
@@ -29,9 +29,14 @@ def normalize_angle(angle):
 
 class LocalPlanner:
     """
-    Drives a differential-drive robot along a list of (x, y) waypoints,
-    one at a time, using separate proportional gains for linear and
-    angular velocity.
+    Drives a differential-drive robot along a list of (x, y) waypoints
+    using Pure Pursuit: rather than steering at whichever waypoint is
+    next in the array, it advances the target index past any waypoint
+    already inside the lookahead radius, so it's always aiming at a
+    point far enough ahead to produce smooth, curve-cutting motion
+    instead of a hard stop-and-turn at every intermediate node. Only
+    the final waypoint uses d_tolerance for arrival; every waypoint
+    before it is only ever a "carrot" the lookahead check skips past.
     """
 
     def __init__(
@@ -41,6 +46,7 @@ class LocalPlanner:
         v_max=0.5,
         omega_max=1.5,
         d_tolerance=0.15,
+        lookahead_distance=1.0,
         on_goal_reached=None,
     ):
         # Tuning parameters
@@ -49,6 +55,7 @@ class LocalPlanner:
         self.v_max = v_max
         self.omega_max = omega_max
         self.d_tolerance = d_tolerance
+        self.lookahead_distance = lookahead_distance
 
         # Robot state, kept current by on_odometry
         self.x = 0.0
@@ -113,46 +120,47 @@ class LocalPlanner:
         (10-20 Hz) from a timer. Returns (v, omega) to publish to the
         motor controller layer.
         """
-        # 1. Failsafe -- no active path means no motion
-        if not self.is_active:
+        # 1. Failsafe -- no active path means no motion, no exceptions
+        if not self.is_active or not self.waypoint_array:
+            self.is_active = False
             return 0.0, 0.0
-    
-        # 2, 3, 4. Dynamic Lookahead logic (Pure Pursuit)
-        # Advance the target until it is at least 1.0 meter ahead,
-        # but do not advance past the very last waypoint in the array.
+
+        # 2. Pure Pursuit lookahead -- advance the target index past
+        # any waypoint already within lookahead_distance, stopping at
+        # whichever one is far enough to aim at, or at the last
+        # waypoint if the whole remaining tail is inside the radius.
         while self.current_target_index < len(self.waypoint_array) - 1:
             x_t, y_t = self.waypoint_array[self.current_target_index]
-            d = math.hypot(x_t - self.x, y_t - self.y)
-            
-            # If the waypoint is closer than our 1.0m lookahead, skip it
-            if d < 1.0:
+            d_to_current = math.hypot(x_t - self.x, y_t - self.y)
+            if d_to_current < self.lookahead_distance:
                 self.current_target_index += 1
             else:
                 break
-            
-        # Compute errors for the selected lookahead waypoint
+
         x_t, y_t = self.waypoint_array[self.current_target_index]
         dx = x_t - self.x
         dy = y_t - self.y
         d = math.hypot(dx, dy)
-    
-        # Final goal reached check
-        if self.current_target_index >= len(self.waypoint_array) - 1 and d < self.d_tolerance:
+
+        # 3. Goal evaluation -- only the final waypoint can end the path,
+        # and only once we're within the (tight) arrival tolerance.
+        is_final_waypoint = self.current_target_index == len(self.waypoint_array) - 1
+        if is_final_waypoint and d < self.d_tolerance:
             self.is_active = False
             if self.on_goal_reached is not None:
                 self.on_goal_reached()
             return 0.0, 0.0
-    
+
+        # 4. Heading error toward the current lookahead target
         theta_desired = math.atan2(dy, dx)
         e_theta = normalize_angle(theta_desired - self.theta)
-    
+
         # 5. Proportional control
         omega = self.k_omega * e_theta
         v = self.k_v * d * math.cos(e_theta)
-        
         if v < 0:
-            v = 0.0  # spin in place rather than reverse
-    
+            v = 0.0  # spin in place rather than reverse into the target
+
         # 6. Kinematic clamps
         if v > self.v_max:
             v = self.v_max
@@ -160,6 +168,6 @@ class LocalPlanner:
             omega = self.omega_max
         if omega < -self.omega_max:
             omega = -self.omega_max
-    
+
         # 7. Hand the command back for the outer layer to publish
         return v, omega

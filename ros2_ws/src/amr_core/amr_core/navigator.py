@@ -89,13 +89,18 @@ class AStarPlanner:
     def world_to_grid(self, wx, wy):
         """Converts world-frame meters to (col, row) grid indices."""
         col = int(round((wx - self.origin[0]) / self.resolution))
-        row = int(round((wy - self.origin[1]) / self.resolution))
+        # row = int(round((wy - self.origin[1]) / self.resolution))
+        # Calculate physical offset, then invert against total height
+        raw_row = int(round((wy - self.origin[1]) / self.resolution))
+        row = (self.rows - 1) - raw_row    
         return col, row
 
     def grid_to_world(self, col, row):
         """Converts (col, row) grid indices back to world-frame meters."""
         wx = self.origin[0] + col * self.resolution
-        wy = self.origin[1] + row * self.resolution
+        # wy = self.origin[1] + row * self.resolution
+        # Invert the row index back to physical space
+        wy = self.origin[1] + ((self.rows - 1 - row) * self.resolution)
         return wx, wy
 
     def _in_bounds(self, x, y):
