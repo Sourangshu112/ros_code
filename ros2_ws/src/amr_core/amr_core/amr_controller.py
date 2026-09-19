@@ -91,13 +91,15 @@ def follow_path(node, cmd_pub, world_path):
     
     vel_msg = Twist()
     while rclpy.ok() and local_driver.is_active:
+        # print(f"x: {node.current_x}, y: {node.current_y}, yaw: {node.current_yaw}", flush=True)
+
         local_driver.on_odometry(node.current_x, node.current_y, theta=node.current_yaw)
         v, omega = local_driver.step()
         
         vel_msg.linear.x = v
         vel_msg.angular.z = omega
         cmd_pub.publish(vel_msg)
-        time.sleep(0.1)  
+        time.sleep(0.05)  
         
     vel_msg.linear.x = 0.0
     vel_msg.angular.z = 0.0

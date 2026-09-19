@@ -94,14 +94,12 @@ class PeerNode(Node):
         self.get_logger().info(f"[{self.get_name()}] Peer Node Online. Ready for tasks.")
 
     def odom_callback(self, msg: Odometry):
-        self.current_x = msg.pose.pose.position.x + self.offset_x
-        self.current_y = msg.pose.pose.position.y + self.offset_y
+        self.current_x = msg.pose.pose.position.x
+        self.current_y = msg.pose.pose.position.y
         q = msg.pose.pose.orientation
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
         self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
-
-        self.current_yaw = math.atan2(siny_cosp, cosy_cosp) + self.offset_theta
         
         # Update CBBA Agent's physical state so future bids are accurate
         self.agent.x = self.current_x

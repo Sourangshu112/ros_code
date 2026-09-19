@@ -39,16 +39,7 @@ class LocalPlanner:
     before it is only ever a "carrot" the lookahead check skips past.
     """
 
-    def __init__(
-        self,
-        k_v=1.0,
-        k_omega=2.0,
-        v_max=0.5,
-        omega_max=1.5,
-        d_tolerance=0.15,
-        lookahead_distance=1.0,
-        on_goal_reached=None,
-    ):
+    def __init__(self, k_v=1.0, k_omega=2.0, v_max=0.5, omega_max=1.5, d_tolerance=0.15, lookahead_distance=0.6, on_goal_reached=None,):
         # Tuning parameters
         self.k_v = k_v
         self.k_omega = k_omega
@@ -56,6 +47,12 @@ class LocalPlanner:
         self.omega_max = omega_max
         self.d_tolerance = d_tolerance
         self.lookahead_distance = lookahead_distance
+
+        self.prev_v = 0.0
+        self.prev_omega = 0.0
+        self.max_accel_v = 0.5      # Max linear acceleration (m/s^2)
+        self.max_accel_omega = 1.0  # Max angular acceleration (rad/s^2)
+        self.dt = 0.1
 
         # Robot state, kept current by on_odometry
         self.x = 0.0
@@ -154,6 +151,7 @@ class LocalPlanner:
         # 4. Heading error toward the current lookahead target
         theta_desired = math.atan2(dy, dx)
         e_theta = normalize_angle(theta_desired - self.theta)
+        # print(f"theta_desired: {theta_desired}, e_theta: {e_theta}", flush=True)
 
         # 5. Proportional control
         omega = self.k_omega * e_theta
@@ -168,6 +166,26 @@ class LocalPlanner:
             omega = self.omega_max
         if omega < -self.omega_max:
             omega = -self.omega_max
+
+        # Calculate maximum allowed change for this tick
+        max_dv = self.max_accel_v * self.dt
+        max_domega = self.max_accel_omega * self.dt
+
+        # Clamp linear acceleration
+        if v > self.prev_v + max_dv:
+            v = self.prev_v + max_dv
+        elif v < self.prev_v - max_dv:
+            v = self.prev_v - max_dv
+
+        # Clamp angular acceleration
+        if omega > self.prev_omega + max_domega:
+            omega = self.prev_omega + max_domega
+        elif omega < self.prev_omega - max_domega:
+            omega = self.prev_omega - max_domega
+
+        # Store current commands for the next tick
+        self.prev_v = v
+        self.prev_omega = omega
 
         # 7. Hand the command back for the outer layer to publish
         return v, omega
