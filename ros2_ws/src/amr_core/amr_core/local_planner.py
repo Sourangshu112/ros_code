@@ -77,7 +77,7 @@ class LocalPlanner:
         self.on_goal_reached = on_goal_reached
 
     # Event handlers (called from outside, asynchronously)
-    def on_odometry(self, x, y, quaternion=None, theta=None):
+    def on_odometry(self, x, y, theta=None):
         """
         Updates robot state from the latest odometry reading.
 
@@ -87,10 +87,7 @@ class LocalPlanner:
         """
         self.x = x
         self.y = y
-        if quaternion is not None:
-            self.theta = self._quaternion_to_yaw(quaternion)
-        elif theta is not None:
-            self.theta = theta
+        self.theta = theta
 
     def on_path(self, waypoints):
         """
@@ -102,18 +99,19 @@ class LocalPlanner:
         self.current_target_index = 0
         self.is_active = True
 
-    # Helper math
-    @staticmethod
-    def _quaternion_to_yaw(quaternion):
-        """
-        Extracts yaw (rotation about Z) from an (x, y, z, w) quaternion.
-        Only Z-axis rotation matters for a ground-based robot, so
-        roll/pitch are ignored.
-        """
-        qx, qy, qz, qw = quaternion
-        siny_cosp = 2 * (qw * qz + qx * qy)
-        cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
-        return math.atan2(siny_cosp, cosy_cosp)
+    # Helper math 
+    # Not needed as the odometry is processed as x, y, and theta in ros_hardware_interface where it listens and publishes odometry
+    # @staticmethod
+    # def _quaternion_to_yaw(quaternion):
+    #     """
+    #     Extracts yaw (rotation about Z) from an (x, y, z, w) quaternion.
+    #     Only Z-axis rotation matters for a ground-based robot, so
+    #     roll/pitch are ignored.
+    #     """
+    #     qx, qy, qz, qw = quaternion
+    #     siny_cosp = 2 * (qw * qz + qx * qy)
+    #     cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+    #     return math.atan2(siny_cosp, cosy_cosp)
 
     # Pure Pursuit lookahead target selection
     def _get_lookahead_target(self):

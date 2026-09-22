@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from fleet_dashboard.storage_manager import init_db, listener
 import zenoh
+from rclpy.serialization import serialize_message, deserialize_message
 
 from fleet_interfaces.msg import AMRTelemetry, DispatchTask, TaskBid, LocalTrajectory
 from fleet_interfaces.msg import Pose2D
@@ -76,20 +77,19 @@ class DashboardNode(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=100
         )
-        
-        self.subscription = self.create_subscription(AMRTelemetry, '/fleet_status', self.listener_callback, 10)
-        
-        # 2. Listen for bids broadcasted by the AMRs
-        self.bid_subscription = self.create_subscription(TaskBid, '/fleet_tasks_bids', self.bid_callback, 10)
 
-        self.traj_sub = self.create_subscription(LocalTrajectory, '/fleet_trajectories', self.traj_callback, 10)
-        
-        # 3. Task publisher using the Transient Local QoS
-        self.task_publisher = self.create_publisher(DispatchTask, '/fleet_tasks', task_qos)
+        # Zenoh subscribers
+        self.subscription = self.z_session.declare_subscriber('/fleet_status', self.listener_callback)
+        self.bid_subscription = self.z_session.declare_subscriber('/fleet_tasks_bids', self.bid_callback)
+        self.traj_sub = self.z_session.declare_subscriber('/fleet_trajectories', self.traj_callback)
+
+        #Zenoh publisher
+        self.task_publisher = self.z_session.declare_publisher('/fleet_tasks')
         
         print("[Dashboard] WebSocket Server Active. Listening for mesh data...", flush=True)
 
-    def listener_callback(self, msg):
+    def listener_callback(self, sample: zenoh.Sample):
+        msg = deserialize_message(sample.payload.to_bytes(), AMRTelemetry)
         data = {
             "id": msg.robot_id,
             "x": msg.pose.x,
@@ -103,16 +103,18 @@ class DashboardNode(Node):
         # print(data, flush=True)
         socketio.emit('fleet_update', data)
 
-    def traj_callback(self, msg):
+    def traj_callback(self, sample: zenoh.Sample):
         # Flatten the Point32 objects into simple [x, y] arrays for JSON
+        msg = deserialize_message(sample.payload.to_bytes(), LocalTrajectory)
         path_data = [[pt.x, pt.y] for pt in msg.future_waypoints]
         socketio.emit('trajectory_update', {
             "id": msg.robot_id,
             "path": path_data
         })
 
-    def bid_callback(self, msg):
+    def bid_callback(self, sample: zenoh.Sample):
         # Forward the decentralized bid up to the frontend UI
+        msg = deserialize_message(sample.payload.to_bytes(), TaskBid)
         try:
             # Deserialize the CBBA matrices
             y_matrix = json.loads(msg.y_matrix)
@@ -164,8 +166,8 @@ def handle_issue_task(payload):
             y=float(payload['drop'][1]),
             theta=0.0
         )
-
-        ros_node_instance.task_publisher.publish(msg)
+        task_payload = serialize_message(msg)
+        ros_node_instance.task_publisher.put(task_payload)
         print(f"[Dashboard] Issued task {msg.task_id} via Socket.IO", flush=True)
         
     except KeyError as e:
