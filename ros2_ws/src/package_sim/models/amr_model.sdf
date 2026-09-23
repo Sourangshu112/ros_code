@@ -33,7 +33,7 @@
            own frame). mu is now a physically sane rolling-friction value;
            mu2 (lateral) can stay modest since these wheels no longer need
            to slip sideways to turn. -->
-      <surface><friction><ode><mu>1.0</mu><mu2>0.05</mu2><fdir1>1 0 0</fdir1></ode></friction></surface>
+      <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2><fdir1>1 0 0</fdir1></ode></friction></surface>
     </collision>
     <!-- Cylinder inertia about its own axis (local Z, = spin axis): Izz=1/2 m r^2.
          Transverse: Ixx=Iyy=1/12 m(3r^2+h^2), for r=0.35, h=0.2, m=5 -->
@@ -44,7 +44,7 @@
     <visual name="v"><geometry><cylinder><radius>0.35</radius><length>0.2</length></cylinder></geometry><material><diffuse>0.2 0.2 0.2 1</diffuse></material></visual>
     <collision name="c">
       <geometry><cylinder><radius>0.35</radius><length>0.2</length></cylinder></geometry>
-      <surface><friction><ode><mu>1.0</mu><mu2>0.05</mu2><fdir1>1 0 0</fdir1></ode></friction></surface>
+      <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2><fdir1>1 0 0</fdir1></ode></friction></surface>
     </collision>
     <inertial><mass>5</mass><inertia><ixx>0.170</ixx><iyy>0.170</iyy><izz>0.306</izz></inertia></inertial>
   </link>

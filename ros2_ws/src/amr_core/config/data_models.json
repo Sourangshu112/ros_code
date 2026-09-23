@@ -5,7 +5,8 @@
     "robot_radius": 0.95,
     "v_linear": 2.0,
     "v_angular": 1.57,
-    "e_rate": 0.5,
+    "e_rate": 0.2,
+    "e_rate_standstill": 0.1,
     "c_rate": 5.0,
     "lambda_val": 0.05,
     "battery_safety_threshold": 20.0

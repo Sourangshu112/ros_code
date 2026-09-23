@@ -8,7 +8,6 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
 from rclpy.qos import qos_profile_sensor_data
 import zenoh
-from rclpy.serialization import deserialize_message
 
 # External module imports
 from fleet_interfaces.msg import AMRTelemetry, FleetVelocity
@@ -25,31 +24,14 @@ class ROSHardwareInterface:
 
         # Subscribers
         self.odom_sub = self.node.create_subscription(Odometry, f'/{self.node.get_name()}/odom', self.odom_callback, qos_profile_sensor_data)
-        
-        # Fleet subscriber to populate ORCA's awareness
-        self.fleet_sub = self.node.consensus.z_session.declare_subscriber('/fleet_status', self.fleet_callback)
-
+    
         # Timers
         self.state_timer = self.node.create_timer(10.0, self.check_battery_status_loop)
 
     def update_peer_state(self, msg: FleetVelocity):
         """Thread-safe update of neighboring robots from Zenoh."""
         with self.peer_lock:
-            self.peer_states[msg.robot_id] = msg
-
-    def fleet_callback(self, sample: zenoh.Sample):
-        """Updates the neighbor dictionary for collision avoidance."""
-        msg = deserialize_message(sample.payload.to_bytes(), AMRTelemetry)
-        if msg.robot_id == self.node.get_name():
-            return
-        # Convert incoming telemetry into ORCA-compatible format
-        self.neighbors[msg.robot_id] = Neighbor(
-            x=msg.pose.x,
-            y=msg.pose.y,
-            vx=0.0,  # Assumed 0 if velocity is not explicitly broadcasted
-            vy=0.0,
-            radius=0.3
-        )
+            self.peer_states[msg.robot_id] = (msg, time.time())
 
     def odom_callback(self, msg: Odometry):
         self.node.current_x = msg.pose.pose.position.x
@@ -67,6 +49,7 @@ class ROSHardwareInterface:
 
     def trigger_hardware_thread(self):
         if not self.node.is_driving:
+            self.node.is_driving = True
             threading.Thread(target=self.execute_physical_tasks, daemon=True).start()
 
     def check_battery_status_loop(self):
@@ -75,6 +58,8 @@ class ROSHardwareInterface:
     # --- PHYSICAL EXECUTION BLOCK ---
 
     def get_world_path(self, start_x, start_y, target_x, target_y):
+        if math.hypot(target_x - start_x, target_y - start_y) < 0.5:
+            return [(target_x, target_y)]
         navigator = self.node.global_navigator
         start_col, start_row = navigator.world_to_grid(start_x, start_y)
         target_col, target_row = navigator.world_to_grid(target_x, target_y)
@@ -86,7 +71,6 @@ class ROSHardwareInterface:
         return [navigator.grid_to_world(col, row) for col, row in grid_path]
 
     def execute_physical_tasks(self):
-        self.node.is_driving = True
         
         while self.node.agent.bundle and rclpy.ok():
             task_dict = self.node.agent.bundle[0]
@@ -110,30 +94,40 @@ class ROSHardwareInterface:
             # 2. Leg 1: Move to Pickup
             self.node.get_logger().info(f"[{task_id}] Moving to pickup...")
             if not self.follow_path(path_to_pickup):
+                if getattr(self.node, 'cancel_current_path', False):
+                    self.node.cancel_current_path = False
+                    continue  # Safely loop back to pick up the new charging task
                 self.node.agent.abandon_current_task()
                 self.node.active_trajectory = []
                 continue
-                
+
             self.node.get_logger().info(f"[{task_id}] Arrived at pickup. Loading...")
             time.sleep(task_dict.get('t_load', 2.0))
-            
-            # Mark start time in Zenoh ledger if the task exists in consensus
+
             if task_id in self.node.consensus.ledger_data:
                 self.node.consensus.ledger_data[task_id]["Task_starting_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.node.consensus.z_session.put(f"fleet/tasks/ledger/{task_id}", json.dumps(self.node.consensus.ledger_data[task_id]))
-            
+
             self.node.agent.advance_leg()
-            
+
             # 3. Leg 2: Drop-off
             self.node.active_trajectory = path_to_drop
             self.node.get_logger().info(f"[{task_id}] Moving to drop-off...")
             if not self.follow_path(path_to_drop):
+                if getattr(self.node, 'cancel_current_path', False):
+                    self.node.cancel_current_path = False
+                    continue
                 self.node.agent.abandon_current_task()
                 self.node.active_trajectory = []
                 continue
                 
             self.node.get_logger().info(f"[{task_id}] Arrived at drop-off. Unloading...")
-            time.sleep(task_dict.get('t_unload', 2.0))
+            # --- NEW: Block thread if charging, otherwise normal sleep ---
+            if task_dict.get('is_exclusive'):
+                while self.node.battery < 100.0 and rclpy.ok():
+                    time.sleep(1.0)
+            else:
+                time.sleep(task_dict.get('t_unload', 2.0))
             
             self.node.agent.advance_leg()
             self.node.consensus.finish_task(task_id)
@@ -147,49 +141,56 @@ class ROSHardwareInterface:
         """The 20 Hz ORCA Execution Loop"""
         local_driver = LocalPlanner(v_max=self.node.v_linear)
         local_driver.on_path(world_path)
-        
+
         orca = ORCAFilter(epsilon=0.1, radius=0.3, tau=2.0, v_max=self.node.v_linear)
         vel_msg = Twist()
-        
+
         while rclpy.ok() and local_driver.is_active:
-            # 1. Update own state
+            if getattr(self.node, 'cancel_current_path', False):
+                break
+            
             local_driver.on_odometry(self.node.current_x, self.node.current_y, theta=self.node.current_yaw)
             vx_pref, vy_pref = local_driver.step()
-            
-            # 2. Filter Peer States (Drop peers older than 0.5s)
+
             current_time = time.time()
             active_neighbors = []
-            
+
             with self.peer_lock:
-                for peer_id, peer_msg in list(self.peer_states.items()):
-                    if current_time - peer_msg.timestamp > 0.5:
+                for peer_id, state_tuple in list(self.peer_states.items()):
+                    peer_msg, recv_time = state_tuple
+
+                    if current_time - recv_time > 0.5:
                         del self.peer_states[peer_id]
                     else:
                         active_neighbors.append(Neighbor(
-                            x=peer_msg.x, 
-                            y=peer_msg.y,
-                            vx=peer_msg.vx, 
-                            vy=peer_msg.vy,
-                            radius=peer_msg.radius
+                            x=peer_msg.x, y=peer_msg.y,
+                            vx=peer_msg.vx, vy=peer_msg.vy, radius=peer_msg.radius
                         ))
-            
-            # 3. Compute Safe Vector
+                        
+                # --- DEBUG PRINT ---
+                if active_neighbors:
+                    neighbor_info = ", ".join([f"{peer_id} at ({n.x:.2f}, {n.y:.2f})" for peer_id, (peer_msg, _) in self.peer_states.items() for n in active_neighbors if n.x == peer_msg.x])
+                    self.node.get_logger().info(f"ORCA tracking {len(active_neighbors)} neighbors: {neighbor_info}")
+                # -------------------
+
             v_safe, omega_safe = orca.step(
-                x=self.node.current_x, 
-                y=self.node.current_y, 
-                theta=self.node.current_yaw, 
-                v_pref=(vx_pref, vy_pref), 
-                neighbors=active_neighbors
+                x=self.node.current_x, y=self.node.current_y, theta=self.node.current_yaw, 
+                v_pref=(vx_pref, vy_pref), neighbors=active_neighbors
             )
-            
-            # 4. Command Motors at 20 Hz
+
             vel_msg.linear.x = float(v_safe)
             vel_msg.angular.z = float(omega_safe)
             self.cmd_pub.publish(vel_msg)
-            
+
             time.sleep(0.05)
-            
+
+        # GUARANTEE MOTORS STOP FIRST
         vel_msg.linear.x = 0.0
         vel_msg.angular.z = 0.0
         self.cmd_pub.publish(vel_msg)
+
+        # THEN CHECK IF WE ABORTED
+        if getattr(self.node, 'cancel_current_path', False):
+            return False
+
         return True

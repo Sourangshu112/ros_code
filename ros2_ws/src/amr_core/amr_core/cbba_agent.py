@@ -39,54 +39,62 @@ class CBBANode:
             angle_diff = (2 * math.pi) - angle_diff
         return angle_diff / self.node.v_angular
 
-    # def _calc_travel_time(self, target_x, target_y, origin_x=None, origin_y=None):
-    #     ox = self.node.current_x if origin_x is None else origin_x
-    #     oy = self.node.current_y if origin_y is None else origin_y
-    #     distance = math.hypot(target_x - ox, target_y - oy)
-    #     return (distance / self.node.v_linear) + (1.0 if distance > 0 else 0.0)
     def _calc_travel_time(self, target_x, target_y, origin_x=None, origin_y=None):
         ox = self.node.current_x if origin_x is None else origin_x
         oy = self.node.current_y if origin_y is None else origin_y
-        
-        navigator = self.node.global_navigator
-        start_col, start_row = navigator.world_to_grid(ox, oy)
-        target_col, target_row = navigator.world_to_grid(target_x, target_y)
-        
-        # Calculate obstacle-aware path using D* Lite
-        grid_path = navigator.compute_path((start_col, start_row), (target_col, target_row))
-        
-        # If the target is unreachable (e.g., inside an obstacle), reject the bid
-        if not grid_path:
-            return float('inf')
-            
-        # Convert grid coordinates back to world coordinates and sum the segments
-        distance = 0.0
-        world_path = [navigator.grid_to_world(c, r) for c, r in grid_path]
-        for i in range(1, len(world_path)):
-            prev_x, prev_y = world_path[i-1]
-            curr_x, curr_y = world_path[i]
-            distance += math.hypot(curr_x - prev_x, curr_y - prev_y)
-            
+        distance = math.hypot(target_x - ox, target_y - oy)
         return (distance / self.node.v_linear) + (1.0 if distance > 0 else 0.0)
-    '''
 
-*   **World-to-Grid Translation:** The physical `ox` and `oy` coordinates are first mapped to the discrete costmap via 
-    `navigator.world_to_grid` so the `DStarLitePlanner` can process the graph.
-*   **Path Unreachability:** If the D* Lite search returns an empty array `[]` (meaning the target is walled off or invalid), 
-    the function returns `float('inf')`. This safely cascades into your bidding logic, as `tau = inf` will 
-    instantly fail the battery check (`inf * e_rate > battery`) and force a bid of `0.0`.
-*   **True Distance Aggregation:** The planner returns a list of grid coordinates. 
-    To maintain exact physical distance accuracy, the list is projected back into world 
-    coordinates and the Euclidean distance of every intermediate segment is summed. 
+    
+    # def _calc_travel_time(self, target_x, target_y, origin_x=None, origin_y=None):
+    #     ox = self.node.current_x if origin_x is None else origin_x
+    #     oy = self.node.current_y if origin_y is None else origin_y
+        
+    #     distance_finder = self.node.distance_for_bidding
+    #     start_col, start_row = distance_finder.world_to_grid(ox, oy)
+    #     target_col, target_row = distance_finder.world_to_grid(target_x, target_y)
+        
+    #     # Calculate obstacle-aware path using A*
+    #     grid_path = distance_finder.find_path((start_col, start_row), (target_col, target_row))
+        
+    #     # If the target is unreachable (e.g., inside an obstacle), reject the bid
+    #     if not grid_path:
+    #         return float('inf')
+            
+    #     # Convert grid coordinates back to world coordinates and sum the segments
+    #     distance = 0.0
+    #     world_path = [distance_finder.grid_to_world(c, r) for c, r in grid_path]
+    #     for i in range(1, len(world_path)):
+    #         prev_x, prev_y = world_path[i-1]
+    #         curr_x, curr_y = world_path[i]
+    #         distance += math.hypot(curr_x - prev_x, curr_y - prev_y)
+            
+    #     return (distance / self.node.v_linear) + (1.0 if distance > 0 else 0.0)
+    # def _calc_travel_time(self, target_x, target_y, origin_x=None, origin_y=None):
+    #     ox = self.node.current_x if origin_x is None else origin_x
+    #     oy = self.node.current_y if origin_y is None else origin_y
 
-    **Architectural Warning for CBBA Bidding** 
-    The CBBA bundle builder evaluates every open task repeatedly during its consensus loop. 
-    By swapping Euclidean distance for a full D* Lite path search inside `_calc_travel_time`, 
-    the `build_bundle` function will now trigger hundreds of graph searches per second. 
-    If the node begins to drop ROS 2 messages or lock up due to CPU bottlenecking, 
-    you may need to implement a cached distance matrix (an offline lookup table of distances between all known pickup/drop-off nodes) 
-    rather than running D* Lite on the fly during an auction.
-    '''
+    #     navigator = self.node.bidding_navigator
+    #     start_col, start_row = navigator.world_to_grid(ox, oy)
+    #     target_col, target_row = navigator.world_to_grid(target_x, target_y)
+
+    #     # Calculate obstacle-aware path using A*
+    #     grid_path = navigator.find_path((start_col, start_row), (target_col, target_row))
+
+    #     # If the target is unreachable (e.g., inside an obstacle), reject the bid
+    #     if not grid_path:
+    #         return float('inf')
+
+    #     # Convert grid coordinates back to world coordinates and sum the segments
+    #     distance = 0.0
+    #     world_path = [navigator.grid_to_world(c, r) for c, r in grid_path]
+    #     for i in range(1, len(world_path)):
+    #         prev_x, prev_y = world_path[i-1]
+    #         curr_x, curr_y = world_path[i]
+    #         distance += math.hypot(curr_x - prev_x, curr_y - prev_y)
+
+    #     return (distance / self.node.v_linear) + (1.0 if distance > 0 else 0.0)
+
     def _calc_task_time(self, task, origin_x=None, origin_y=None, origin_theta=None):
         ox = self.node.current_x if origin_x is None else origin_x
         oy = self.node.current_y if origin_y is None else origin_y
@@ -300,4 +308,8 @@ class CBBANode:
             # Force the charging sequence to the front of the execution queue
             self.bundle.insert(0, self._generate_charging_task())
             self._pickup_done = False
+
+            # --- NEW: Abort physical loop and wake thread ---
+            self.node.cancel_current_path = True
+            self.node.hw_interface.trigger_hardware_thread()
         return self.node.battery

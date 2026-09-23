@@ -23,16 +23,15 @@ class P2PConsensus:
         
         # ROS Communication
         #Publisher
-        self.bid_pub = self.z_session.declare_publisher(TaskBid, '/fleet_tasks_bids', 10)
-        self.telemetry_pub = self.z_session.declare_publisher(AMRTelemetry, '/fleet_status', 10)
-        self.traj_pub = self.z_session.declare_publisher(LocalTrajectory, '/fleet_trajectories', 10)
+        self.bid_pub = self.z_session.declare_publisher('fleet_tasks_bids')
+        self.telemetry_pub = self.z_session.declare_publisher('fleet_status')
+        self.traj_pub = self.z_session.declare_publisher('fleet_trajectories')
         self.orca_pub = self.z_session.declare_publisher(f"fleet/orca/{self.node.get_name()}")
 
         #subscriber
-        self.task_sub = self.z_session.declare_subscriber(DispatchTask, '/fleet_tasks', self.on_new_task_received, task_qos)
-        self.bid_sub = self.z_session.declare_subscriber(TaskBid, '/fleet_tasks_bids', self.on_bid_received, 10)
+        self.task_sub = self.z_session.declare_subscriber('fleet_tasks', self.on_new_task_received)
+        self.bid_sub = self.z_session.declare_subscriber('fleet_tasks_bids', self.on_bid_received)
         self.orca_sub = self.z_session.declare_subscriber("fleet/orca/*", self.on_zenoh_orca_received)
-
 
         # Timers
         self.telem_timer = self.node.create_timer(1.0, self.publish_telemetry)
@@ -54,7 +53,7 @@ class P2PConsensus:
     def on_zenoh_orca_received(self, sample):
         """Deserializes incoming binary Zenoh payload back to a ROS 2 message."""
         try:
-            msg = deserialize_message(sample.payload, FleetVelocity)
+            msg = deserialize_message(sample.payload.to_bytes(), FleetVelocity)
             if msg.robot_id != self.node.get_name():
                 self.hw.update_peer_state(msg)
         except Exception as e:
@@ -64,7 +63,7 @@ class P2PConsensus:
             msg = AMRTelemetry()
             msg.robot_id = self.node.get_name()
             msg.pose = Pose2D(x=self.node.current_x, y=self.node.current_y, theta=self.node.current_yaw)
-            msg.battery_percent = self.node.battery
+            msg.battery_percent = float(self.node.battery)
             msg.system_status = 1 if self.node.is_driving else 0
             msg.is_busy = self.node.is_busy
             

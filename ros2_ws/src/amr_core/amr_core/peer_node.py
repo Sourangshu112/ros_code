@@ -8,6 +8,7 @@ from amr_core.cbba_agent import CBBANode
 from amr_core.ros_hardware_interface import ROSHardwareInterface
 from amr_core.p2p_consensus import P2PConsensus
 from amr_core.navigator import DStarLitePlanner
+from amr_core.navigator_Astar import AStarPlanner
 
 _SHARE_DIR = get_package_share_directory('amr_core')
 _CONFIG_PATH = os.path.join(_SHARE_DIR, 'config', 'data_models.json')
@@ -18,14 +19,15 @@ with open(_CONFIG_PATH, "r") as _f:
     _CONFIG = json.load(_f)
 
 SYSTEM_CONSTANTS = _CONFIG["system_constants"]
-OPEN_TASKS = _CONFIG["open_tasks"]
 V_LINEAR = SYSTEM_CONSTANTS["v_linear"]
 V_ANGULAR = SYSTEM_CONSTANTS["v_angular"]
 E_RATE = SYSTEM_CONSTANTS["e_rate"]
+E_RATE_STANDSTILL = SYSTEM_CONSTANTS["e_rate_standstill"]
 C_RATE = SYSTEM_CONSTANTS["c_rate"]
 LAMBDA_VAL = SYSTEM_CONSTANTS["lambda_val"]
 BATTERY_SAFETY_THRESHOLD = SYSTEM_CONSTANTS["battery_safety_threshold"]
 BATTERY_FULL = SYSTEM_CONSTANTS.get("battery_full", 100.0)
+RADIUS = SYSTEM_CONSTANTS["robot_radius"]
 
 class PeerNode(Node):
     def __init__(self):
@@ -54,19 +56,22 @@ class PeerNode(Node):
         self.v_linear = V_LINEAR
         self.v_angular = V_ANGULAR
         self.e_rate = E_RATE
+        self.e_rate_standstill = E_RATE_STANDSTILL
         self.c_rate = C_RATE
         self.lambda_val = LAMBDA_VAL
         self.battery_threshold = BATTERY_SAFETY_THRESHOLD
         self.battery = BATTERY_FULL
+        self.robot_radius = RADIUS
 
         # 4. Dependency Injection & Module Instantiation
         self.agent = CBBANode(self)
         self.hw_interface = ROSHardwareInterface(self)
         self.consensus = P2PConsensus(self, self.hw_interface)
-        self.battery_manager = BatteryManager(self, driving_multiplier=3.0)
+        self.battery_manager = BatteryManager(self)
 
         #5 Other classes
-        self.global_navigator = DStarLitePlanner.from_costmap(costmap_path, robot_radius=0.3)
+        self.global_navigator = DStarLitePlanner.from_costmap(costmap_path, robot_radius=self.robot_radius)
+        # self.bidding_navigator = AStarPlanner.from_costmap(costmap_path)
 
         self.get_logger().info(f"[{self.get_name()}] Peer Node Online. Ready for tasks.")
 

@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'rclpy', 'fleet_interfaces'],
     zip_safe=True,
     maintainer='soura',
     maintainer_email='sourangshu098@gmail.com',

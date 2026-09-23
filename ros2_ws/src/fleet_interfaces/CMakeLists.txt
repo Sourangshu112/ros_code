@@ -21,6 +21,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TaskBid.msg"
   "msg/Heartbeat.msg"
   "msg/DispatchTask.msg"
+  "msg/FleetVelocity.msg"
   "srv/IntersectionLock.srv"
   "action/ExecuteTask.action"
   DEPENDENCIES geometry_msgs action_msgs

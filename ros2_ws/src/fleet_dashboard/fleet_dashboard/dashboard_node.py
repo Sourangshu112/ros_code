@@ -78,13 +78,14 @@ class DashboardNode(Node):
             depth=100
         )
 
+        self.z_session = zenoh.open(zenoh.Config())
         # Zenoh subscribers
-        self.subscription = self.z_session.declare_subscriber('/fleet_status', self.listener_callback)
-        self.bid_subscription = self.z_session.declare_subscriber('/fleet_tasks_bids', self.bid_callback)
-        self.traj_sub = self.z_session.declare_subscriber('/fleet_trajectories', self.traj_callback)
+        self.subscription = self.z_session.declare_subscriber('fleet_status', self.listener_callback)
+        self.bid_subscription = self.z_session.declare_subscriber('fleet_tasks_bids', self.bid_callback)
+        self.traj_sub = self.z_session.declare_subscriber('fleet_trajectories', self.traj_callback)
 
         #Zenoh publisher
-        self.task_publisher = self.z_session.declare_publisher('/fleet_tasks')
+        self.task_publisher = self.z_session.declare_publisher('fleet_tasks')
         
         print("[Dashboard] WebSocket Server Active. Listening for mesh data...", flush=True)
 
