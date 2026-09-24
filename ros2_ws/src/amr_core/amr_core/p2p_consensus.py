@@ -103,7 +103,12 @@ class P2PConsensus:
         bid_msg.robot_id = self.node.get_name()
         bid_msg.y_matrix = json.dumps(payload["Y_ledger"])
         bid_msg.z_matrix = json.dumps(payload["Z_ledger"])
-        bid_msg.t_matrix = json.dumps(payload["T"])
+        extended_t_data = {
+            "T": payload["T"],
+            "path_segment": payload.get("path_segment", []),
+            "task_reward": payload.get("task_reward", 0.0)
+        }
+        bid_msg.t_matrix = json.dumps(extended_t_data)
         
         # Serialize the ROS 2 object to raw C-struct bytes
         binary_payload = serialize_message(bid_msg)
@@ -142,17 +147,21 @@ class P2PConsensus:
 
         if msg.robot_id == self.node.get_name():
             return
+        extended_t_data = json.loads(msg.t_matrix)
             
         payload = {
             "id": msg.robot_id,
             "Y_ledger": json.loads(msg.y_matrix),
             "Z_ledger": json.loads(msg.z_matrix),
-            "T": json.loads(msg.t_matrix)
+            "T": extended_t_data.get("T", {}),
+            "path_segment": extended_t_data.get("path_segment", []),
+            "task_reward": extended_t_data.get("task_reward", 0.0)
         }
         
         changed = self.node.agent.receive_broadcast(payload)
         if changed:
             self.broadcast_matrices()
+        
     def evaluate_consensus(self, task_id: str):
         if task_id not in self.node.agent.Z:
             return

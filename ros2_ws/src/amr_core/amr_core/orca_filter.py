@@ -422,7 +422,7 @@ def solve_linear_program(v_pref, lines, v_max):
 # MapToDifferentialDrive
 # ---------------------------------------------------------------------------
 
-def map_to_differential_drive(v_safe, theta, epsilon):
+def map_to_differential_drive(v_safe, theta, epsilon, omega_max=None):
     """
     Transforms the global-frame safe velocity into the robot's local
     frame and derives the differential-drive (v, omega) command from
@@ -436,6 +436,10 @@ def map_to_differential_drive(v_safe, theta, epsilon):
 
     v = v_local_x
     omega = v_local_y / epsilon
+
+    if omega_max is not None and omega_max > 0.0:
+        omega = max(-omega_max, min(omega_max, omega))
+
     return v, omega
 
 
@@ -467,15 +471,16 @@ class ORCAFilter:
         combined safety radius.
     """
 
-    __slots__ = ("epsilon", "radius", "tau", "v_max", "time_step")
+    __slots__ = ("epsilon", "radius", "tau", "v_max", "omega_max", "time_step")
 
-    def __init__(self, epsilon=0.1, radius=0.3, tau=2.0, v_max=0.5, time_step=0.1):
+    def __init__(self, epsilon=0.1, radius=0.3, tau=2.0, v_max=2.0, omega_max=1.0, time_step=0.1):
         if epsilon <= 0.0:
             raise ValueError("epsilon must be > 0 (MapToDifferentialDrive divides by it)")
         self.epsilon = epsilon
         self.radius = radius
         self.tau = tau
         self.v_max = v_max
+        self.omega_max = omega_max
         self.time_step = time_step
 
     def step(self, x, y, theta, v_pref, neighbors, v_current=None):
@@ -501,7 +506,7 @@ class ORCAFilter:
         lines = compute_half_planes(p_A, v_A, neighbors, self.tau, self.radius, self.time_step)
         v_safe = solve_linear_program(v_pref, lines, self.v_max)
 
-        return map_to_differential_drive(v_safe, theta, self.epsilon)
+        return map_to_differential_drive(v_safe, theta, self.epsilon, self.omega_max)
 
 
 # ---------------------------------------------------------------------------
