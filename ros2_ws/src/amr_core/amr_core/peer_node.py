@@ -51,6 +51,7 @@ class PeerNode(Node):
         self.is_driving = False
         self.is_busy = False
         self.active_trajectory = []
+        self.static_obstacles = []
 
         #5 System constants
         self.v_linear = V_LINEAR

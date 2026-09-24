@@ -21,7 +21,7 @@ def generate_launch_description():
         {'name': 'robot_2', 'x': '-13.0', 'y': '-6.0', 'z': '0.8'},
         {'name': 'robot_3', 'x': '-13.0', 'y': '-11.0', 'z': '0.8'},
     ]
-
+    world_name = "realistic_fleet_warehouse" # world name must be updated here
     # nodes = [start_gazebo]
     nodes = []
 
@@ -47,12 +47,14 @@ def generate_launch_description():
         arguments=[
             # Target the exact topics your gz topic -l command revealed
             f"/model/{robot['name']}/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-            f"/model/{robot['name']}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry"
+            f"/model/{robot['name']}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
+            f"/world/{world_name}/model/{robot['name']}/link/chassis/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
         ],
         remappings=[
             # Translate the Gazebo topics into the ROS topics peer_node expects
             (f"/model/{robot['name']}/cmd_vel", f"/{robot['name']}/cmd_vel"),
-            (f"/model/{robot['name']}/odometry", f"/{robot['name']}/odom")
+            (f"/model/{robot['name']}/odometry", f"/{robot['name']}/odom"),
+            (f"/world/{world_name}/model/{robot['name']}/link/chassis/sensor/lidar/scan", f"/{robot['name']}/scan"),
         ],
         output='screen'
     )
