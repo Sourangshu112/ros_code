@@ -149,7 +149,7 @@ class ROSHardwareInterface:
         self.node.get_logger().info("Bundle empty. Idling.")
 
     def follow_path(self, world_path):
-        """The 20 Hz ORCA Execution Loop"""
+        # The 20 Hz ORCA Execution Loop
         local_driver = LocalPlanner(v_max=self.node.v_linear,
                                     yield_check=lambda: self.node.agent.yield_flag,)
         local_driver.on_path(world_path)

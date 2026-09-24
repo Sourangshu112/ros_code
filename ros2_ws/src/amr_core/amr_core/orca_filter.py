@@ -211,9 +211,11 @@ def compute_half_planes(p_A, v_A, neighbors, tau, r_A, time_step=DEFAULT_TIME_ST
                         (rel_pos[0] * leg + rel_pos[1] * combined_radius) / dist_sq,
                         (-rel_pos[0] * combined_radius + rel_pos[1] * leg) / dist_sq,
                     )
+                    # Geometrically define the outward normal (rotated 90 degrees right)
+                    n = (leg_dir[1], -leg_dir[0])
                 dot2 = vec_dot(rel_vel, leg_dir)
                 u = vec_sub(vec_scale(leg_dir, dot2), rel_vel)
-                n = vec_normalize(u)
+                # n = vec_normalize(u)
         else:
             # Already inside the safety disc (should only happen transiently,
             # e.g. right after a neighbor cuts in close). Use the current
