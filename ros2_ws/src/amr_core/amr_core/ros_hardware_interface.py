@@ -19,6 +19,17 @@ class ROSHardwareInterface:
         self.node = node
         self.peer_states = {}
         self.peer_lock = threading.Lock()
+
+        '''
+        Static-obstacle mailbox: a plain list of (x, y) world-frame coordinates.
+        Lives on self.node (not self) so any other module with a reference to
+        the node — e.g. a teammate's LiDAR/obstacle-detection node — can write
+        to it directly: self.node.static_obstacles.append((x, y)) or replace
+        the whole list each scan. This class only ever reads it.
+                
+        '''
+        self.node.static_obstacles.append((x, y, obstacle_radius))
+
         # Publishers
         self.cmd_pub = self.node.create_publisher(Twist, f'/{self.node.get_name()}/cmd_vel', 10)
 
@@ -172,6 +183,20 @@ class ROSHardwareInterface:
                     neighbor_info = ", ".join([f"{peer_id} at ({n.x:.2f}, {n.y:.2f})" for peer_id, (peer_msg, _) in self.peer_states.items() for n in active_neighbors if n.x == peer_msg.x])
                     self.node.get_logger().info(f"ORCA tracking {len(active_neighbors)} neighbors: {neighbor_info}")
                 # -------------------
+            '''
+            # Fold static obstacles into the same neighbor list ORCA sees.
+            # vx=vy=0 because they don't move. responsibility=1.0 because a
+            # static obstacle can't take its share of avoidance the way a
+            # reciprocating peer does — the ego robot has to do 100% of the
+            # steering around it instead of the usual 50/50 split.
+            '''
+            for obs_x, obs_y, obs_radius in self.node.static_obstacles:
+                active_neighbors.append(Neighbor(
+                    x=obs_x, y=obs_y,
+                    vx=0.0, vy=0.0,
+                    radius=obs_radius,
+                    responsibility=1.0,
+                ))
 
             v_safe, omega_safe = orca.step(
                 x=self.node.current_x, y=self.node.current_y, theta=self.node.current_yaw, 
