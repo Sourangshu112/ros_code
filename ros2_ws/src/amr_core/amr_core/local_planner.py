@@ -54,6 +54,7 @@ class LocalPlanner:
         v_max=0.5,
         d_tolerance=0.15,
         on_goal_reached=None,
+        yield_check=None,
     ):
         # Tuning parameters
         self.k_v = k_v
@@ -75,6 +76,12 @@ class LocalPlanner:
         # Same hook cbba_agent.py listens on as before; the vector
         # output changes nothing about this contract.
         self.on_goal_reached = on_goal_reached
+
+        # Zero-arg callable returning True while a traffic-light conflict     # <-- ADD
+        # (cbba_agent.yield_flag) says this robot should hold position.      # <-- ADD
+        # Defaults to "never yield" so existing callers that don't pass it   # <-- ADD
+        # keep behaving exactly as before.                                  # <-- ADD
+        self.yield_check = yield_check if yield_check is not None else (lambda: False)
 
     # Event handlers (called from outside, asynchronously)
     def on_odometry(self, x, y, theta=None):
@@ -148,6 +155,11 @@ class LocalPlanner:
         3's ORCA filter takes this as input and returns whatever should
         actually be published to the motor layer.
         """
+        # 0. Traffic-light hold: skip Pure Pursuit entirely and hand back   
+        # a hard stop while a higher-priority peer clears the bottleneck.  
+        if self.yield_check():                                             
+            return 0.0, 0.0
+        
         # 1. Failsafe -- no active path, or an empty one, means no
         # motion and no index-out-of-range risk in step 2 below.
         if not self.is_active or not self.waypoint_array:
