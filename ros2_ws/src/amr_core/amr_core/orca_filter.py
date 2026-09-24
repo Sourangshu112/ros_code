@@ -361,11 +361,8 @@ def linear_program2(lines, radius, opt_velocity, direction_opt=False):
 def linear_program3(lines, begin_line, radius, result):
     """
     Called only when linear_program2 could not satisfy every half-plane
-    within V_max (a genuinely infeasible configuration -- e.g. several
-    AMRs converging on a corridor too narrow for reciprocal avoidance
-    alone). Relaxes the problem to minimize the worst constraint
-    violation instead of insisting on strict feasibility, so the robot
-    prefers slowing/stopping over an unsafe velocity.
+    within V_max. Relaxes the problem to minimize the worst constraint
+    violation.
     """
     distance = 0.0
 
@@ -375,9 +372,6 @@ def linear_program3(lines, begin_line, radius, result):
         violation = -vec_dot(n_i, vec_sub(result, line_i.point))
 
         if violation > distance:
-            # Re-derive every earlier line as a constraint projected onto
-            # line_i's boundary, then re-optimize along that 1D segment
-            # (pushed toward whichever end minimizes violation of line_i).
             proj_lines = []
             for j in range(i):
                 line_j = lines[j]
@@ -391,16 +385,19 @@ def linear_program3(lines, begin_line, radius, result):
                     t = _det(line_j.direction, vec_sub(line_i.point, line_j.point)) / denom
                     p = vec_add(line_i.point, vec_scale(line_i.direction, t))
 
-                raw_dir = vec_sub(
-                    line_j.direction,
-                    vec_scale(line_i.direction, vec_dot(line_j.direction, line_i.direction)),
-                )
+                # FIX 1: Correctly bisect the collision vectors (Standard ORCA math)
+                raw_dir = vec_sub(line_j.direction, line_i.direction)
                 d = vec_normalize(raw_dir)
                 proj_lines.append(HalfPlane(point=p, direction=d))
 
             opt_dir = (-line_i.direction[1], line_i.direction[0])
-            _, new_result = linear_program2(proj_lines, radius, opt_dir, direction_opt=True)
-            result = new_result
+            
+            # FIX 2: Only update the result if the 2D projection actually succeeded.
+            # If it fails completely, we retain the previous best `result`.
+            count, new_result = linear_program2(proj_lines, radius, opt_dir, direction_opt=True)
+            if count == len(proj_lines):
+                result = new_result
+                
             distance = -vec_dot(n_i, vec_sub(result, line_i.point))
 
     return result
