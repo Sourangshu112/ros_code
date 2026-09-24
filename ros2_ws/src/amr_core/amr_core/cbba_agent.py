@@ -26,6 +26,7 @@ class CBBANode:
         self.T = {}
         
         self._pickup_done = False
+        self.yield_flag = False
 
     # --- KINEMATICS ---
     def _calc_rotation_time(self, target_x, target_y, origin_x=None, origin_y=None, origin_theta=None):
@@ -184,6 +185,117 @@ class CBBANode:
 
         return self.bundle
 
+    # --- CONFLICT DETECTION (TRAFFIC LIGHT) ---
+
+    def _get_upcoming_path_segment(self, lookahead_dist=2.0):
+        """
+        Returns the (x, y) points describing where this robot intends to
+        be over the next `lookahead_dist` meters. Walks self.node.active_trajectory
+        if a path is in progress (set by ros_hardware_interface.execute_physical_tasks);
+        falls back to a straight line toward current_target() otherwise, so a
+        robot that hasn't started moving yet still broadcasts something.
+        """
+        trajectory = getattr(self.node, "active_trajectory", None)
+        ox, oy = self.node.current_x, self.node.current_y
+
+        if trajectory:
+            segment = [(ox, oy)]
+            remaining = lookahead_dist
+            prev_x, prev_y = ox, oy
+            for px, py in trajectory:
+                seg_len = math.hypot(px - prev_x, py - prev_y)
+                if seg_len <= remaining:
+                    segment.append((px, py))
+                    remaining -= seg_len
+                    prev_x, prev_y = px, py
+                    if remaining <= 0:
+                        break
+                else:
+                    ratio = remaining / seg_len if seg_len > 0 else 0.0
+                    segment.append((prev_x + (px - prev_x) * ratio,
+                                    prev_y + (py - prev_y) * ratio))
+                    break
+            return segment
+
+        target = self.current_target()
+        if target is None:
+            return [(ox, oy)]
+        tx, ty, _ = target
+        dist = math.hypot(tx - ox, ty - oy)
+        if dist <= lookahead_dist:
+            return [(ox, oy), (tx, ty)]
+        ratio = lookahead_dist / dist
+        return [(ox, oy), (ox + (tx - ox) * ratio, oy + (ty - oy) * ratio)]
+
+    @staticmethod
+    def _orientation(a, b, c):
+        val = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+        if abs(val) < 1e-9:
+            return 0
+        return 1 if val > 0 else 2
+
+    @classmethod
+    def _segment_intersection(cls, p1, p2, p3, p4):
+        """
+        Orientation-based segment intersection. Returns the crossing point
+        or None. Collinear overlap counts as a miss here; the lookahead
+        segments are short enough that a fast answer every broadcast tick
+        matters more than handling that edge case.
+        """
+        o1 = cls._orientation(p1, p2, p3)
+        o2 = cls._orientation(p1, p2, p4)
+        o3 = cls._orientation(p3, p4, p1)
+        o4 = cls._orientation(p3, p4, p2)
+        if o1 != o2 and o3 != o4:
+            x1, y1 = p1; x2, y2 = p2; x3, y3 = p3; x4, y4 = p4
+            denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+            if abs(denom) < 1e-9:
+                return None
+            t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
+            return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))
+        return None
+
+    def _path_intersection(self, path_a, path_b):
+        for i in range(len(path_a) - 1):
+            for j in range(len(path_b) - 1):
+                point = self._segment_intersection(path_a[i], path_a[i + 1], path_b[j], path_b[j + 1])
+                if point is not None:
+                    return point
+        return None
+
+    def _corridor_width_at(self, point, heading, max_probe=2.0):
+        """
+        Marches outward from `point`, perpendicular to `heading`, one grid
+        cell at a time in both directions, until hitting an obstacle or
+        max_probe meters. Uses self.node.global_navigator, the same
+        AStarPlanner instance ros_hardware_interface.py already queries.
+        """
+        navigator = self.node.global_navigator
+        perp = (-math.sin(heading), math.cos(heading))
+        step = navigator.resolution
+        px, py = point
+        width = 0.0
+        for sign in (1.0, -1.0):
+            d = step
+            while d <= max_probe:
+                col, row = navigator.world_to_grid(px + perp[0] * d * sign, py + perp[1] * d * sign)
+                if not navigator.is_valid_cell(col, row):
+                    break
+                width += step
+                d += step
+        return width
+
+    def _resolve_conflict(self, peer_id, peer_reward):
+        """
+        Higher task reward wins outright. Equal reward falls back to id
+        string comparison, matching the tie-break convention already used
+        for bids elsewhere in receive_broadcast (lower id wins).
+        """
+        my_reward = self.bundle[0]["reward"] if self.bundle else 0.0
+        if peer_reward > my_reward or (peer_reward == my_reward and peer_id < self.id):
+            self.yield_flag = True
+        else:
+            self.yield_flag = False
     # --- PHASE 2: CONSENSUS & SYNC ---
     def make_payload(self, v_x, v_y):
         self.T[self.id] = self.T.get(self.id, 0) + 1
@@ -196,13 +308,27 @@ class CBBANode:
             "Z_ledger": dict(self.Z), 
             "Y_ledger": dict(self.Y), 
             "T": dict(self.T),
+            "path_segment": self._get_upcoming_path_segment(),
+            "task_reward": self.bundle[0]["reward"] if self.bundle else 0.0,
         }
 
     def receive_broadcast(self, payload):
         sid = payload["id"]
         if sid == self.id:
             return False
-        
+
+        peer_path = payload.get("path_segment")         
+        if peer_path:
+            my_path = self._get_upcoming_path_segment()
+            conflict_point = self._path_intersection(my_path, peer_path)
+            if conflict_point is not None:
+                dx = my_path[-1][0] - my_path[0][0]
+                dy = my_path[-1][1] - my_path[0][1]
+                heading = math.atan2(dy, dx)
+                min_width = 2 * (2 * self.node.robot_radius)
+                if self._corridor_width_at(conflict_point, heading) < min_width:
+                    self._resolve_conflict(sid, payload.get("task_reward", 0.0))
+
         incoming_T = payload["T"].get(sid, 0)
         self.T[sid] = max(self.T.get(sid, 0), incoming_T)
         changed = False
