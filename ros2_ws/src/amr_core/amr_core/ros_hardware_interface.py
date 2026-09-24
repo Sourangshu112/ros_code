@@ -236,7 +236,7 @@ class ROSHardwareInterface:
         )
         local_driver.on_path(world_path)
 
-        orca = ORCAFilter(epsilon=0.15, radius=0.3, tau=2.0, v_max=self.node.v_linear, omega_max=self.node.v_angular)
+        orca = ORCAFilter(epsilon=0.15, radius=0.6, tau=2.0, v_max=self.node.v_linear, omega_max=self.node.v_angular)
         vel_msg = Twist()
 
         debug_tick = 0
