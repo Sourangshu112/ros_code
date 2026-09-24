@@ -2,6 +2,7 @@ import rclpy
 import math
 import threading
 import time
+import random
 import json
 from datetime import datetime
 from nav_msgs.msg import Odometry
@@ -22,6 +23,10 @@ class ROSHardwareInterface:
         self.node = node
         self.peer_states = {}
         self.peer_lock = threading.Lock()
+        self.stuck_ticks = 0
+        self.STUCK_THRESHOLD = 10      # Number of ticks to wait before assuming deadlock (e.g., 1 sec at 10Hz)
+        self.NOISE_MAGNITUDE = 0.05    # Size of the random perturbation vector (m/s)
+        self.last_v_safe = 0.0         # Track the output of the previous ORCA step
 
         # Ensure mailbox is initialized on the node
         if not hasattr(self.node, 'static_obstacles'):
@@ -229,17 +234,11 @@ class ROSHardwareInterface:
         self.node.get_logger().info("Bundle empty. Idling.")
 
     def follow_path(self, world_path):
-<<<<<<< HEAD
-        # The 20 Hz ORCA Execution Loop
-        local_driver = LocalPlanner(v_max=self.node.v_linear,
-                                    yield_check=lambda: self.node.agent.yield_flag,)
-=======
         """The 20 Hz ORCA Execution Loop"""
         local_driver = LocalPlanner(
             v_max=self.node.v_linear,
             yield_check=lambda: self.node.agent.yield_flag
         )
->>>>>>> a09329cf4bb1051c9cdb15f84221130bdd8b1d68
         local_driver.on_path(world_path)
 
         orca = ORCAFilter(epsilon=0.15, radius=0.6, tau=2.0, v_max=self.node.v_linear, omega_max=self.node.v_angular)
@@ -280,10 +279,33 @@ class ROSHardwareInterface:
                     responsibility=1.0
                 ))
 
+            # 1. Detect if the robot wants to move, but ORCA forced it to stop on the last tick
+            v_pref_mag = math.hypot(vx_pref, vy_pref)
+
+            if v_pref_mag > 0.05 and abs(self.last_v_safe) < 0.01:
+                self.stuck_ticks += 1
+            else:
+                self.stuck_ticks = 0
+
+            # 2. Inject symmetry-breaking noise if the threshold is exceeded
+            if self.stuck_ticks > self.STUCK_THRESHOLD:
+                noise_x = random.uniform(-self.NOISE_MAGNITUDE, self.NOISE_MAGNITUDE)
+                noise_y = random.uniform(-self.NOISE_MAGNITUDE, self.NOISE_MAGNITUDE)
+                
+                vx_pref += noise_x
+                vy_pref += noise_y
+
+            # 3. Pass the (potentially noisy) v_pref into ORCA
             v_safe, omega_safe = orca.step(
-                x=self.node.current_x, y=self.node.current_y, theta=self.node.current_yaw, 
-                v_pref=(vx_pref, vy_pref), neighbors=active_neighbors
+                x=self.node.current_x, 
+                y=self.node.current_y, 
+                theta=self.node.current_yaw,
+                v_pref=(vx_pref, vy_pref), 
+                neighbors=active_neighbors
             )
+
+            # 4. Save the current output velocity to check for deadlock on the next tick
+            self.last_v_safe = v_safe
 
             # omega_clamped = max(-self.node.v_angular, min(self.node.v_angular, float(omega_safe)))
 
