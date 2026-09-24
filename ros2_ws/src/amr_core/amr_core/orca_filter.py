@@ -205,6 +205,7 @@ def compute_half_planes(p_A, v_A, neighbors, tau, r_A, time_step=DEFAULT_TIME_ST
                         (rel_pos[0] * leg - rel_pos[1] * combined_radius) / dist_sq,
                         (rel_pos[0] * combined_radius + rel_pos[1] * leg) / dist_sq,
                     )
+                    n = (-leg_dir[1], leg_dir[0])
                 else:
                     # right leg
                     leg_dir = (
