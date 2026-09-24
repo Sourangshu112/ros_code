@@ -150,7 +150,8 @@ class ROSHardwareInterface:
 
     def follow_path(self, world_path):
         """The 20 Hz ORCA Execution Loop"""
-        local_driver = LocalPlanner(v_max=self.node.v_linear)
+        local_driver = LocalPlanner(v_max=self.node.v_linear,
+                                    yield_check=lambda: self.node.agent.yield_flag,)
         local_driver.on_path(world_path)
 
         orca = ORCAFilter(epsilon=0.1, radius=0.3, tau=2.0, v_max=self.node.v_linear)
